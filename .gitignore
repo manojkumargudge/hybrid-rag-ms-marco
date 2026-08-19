@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables / secrets
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large RAG artifacts
+data/*.parquet
+data/*.csv
+data/*.json
+
+embeddings/
+indices/
+models/
+
+# Evaluation outputs
+eval/
+*.pkl
+*.npy
+*.faiss
+
+# Logs
+*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/ 
