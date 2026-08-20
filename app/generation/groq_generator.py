@@ -1,7 +1,6 @@
-import os
+﻿from groq import Groq
 
-from dotenv import load_dotenv
-from groq import Groq
+from app.config import settings
 
 
 class GroqGenerator:
@@ -13,24 +12,8 @@ class GroqGenerator:
         self,
         model_name: str | None = None,
     ) -> None:
-        load_dotenv()
-
-        api_key = os.getenv("GROQ_API_KEY")
-
-        if not api_key:
-            raise ValueError(
-                "GROQ_API_KEY is not configured."
-            )
-
-        self.model_name = (
-            model_name
-            or os.getenv(
-                "GROQ_MODEL",
-                "llama-3.3-70b-versatile",
-            )
-        )
-
-        self.client = Groq(api_key=api_key)
+        self.model_name = model_name or settings.groq_model
+        self.client = Groq(api_key=settings.groq_api_key)
 
     def generate(
         self,
