@@ -1,10 +1,9 @@
+import pickle
 from pathlib import Path
 
 import faiss
 import numpy as np
 import pandas as pd
-import pickle
-
 
 ROOT = Path(__file__).resolve().parents[1]
 

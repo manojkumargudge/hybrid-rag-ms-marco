@@ -2,7 +2,6 @@ import json
 import math
 from pathlib import Path
 
-
 QRELS_PATH = Path("eval/qrels.json")
 CANDIDATES_PATH = Path("eval/candidate_results.txt")
 

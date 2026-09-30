@@ -1,7 +1,10 @@
+from logging import getLogger
+
 from fastapi import APIRouter, HTTPException, Request
 
 from app.schemas.query import QueryRequest, QueryResponse
 
+logger = getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1",
@@ -22,10 +25,21 @@ def query_rag(
     """
 
     try:
-        rag_service = request.app.state.rag_service
+        rag_service = request.app.state.get_rag_service()
+    except (FileNotFoundError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "rag_service_unavailable",
+            extra={"error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="RAG service is not ready.",
+        ) from None
 
+    try:
         result = rag_service.answer(
-            query_request.query
+            query=query_request.query,
+            top_k=query_request.top_k,
         )
 
         return QueryResponse(**result)
@@ -36,8 +50,22 @@ def query_rag(
             detail=str(exc),
         ) from exc
 
-    except Exception as exc:
+    except RuntimeError as exc:
+        logger.warning(
+            "answer_generation_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Answer generation failed.",
+        ) from None
+
+    except Exception as exc:  # noqa: BLE001 - keep provider details out of responses
+        logger.error(
+            "rag_pipeline_failed",
+            extra={"error_type": type(exc).__name__},
+        )
         raise HTTPException(
             status_code=500,
             detail="RAG pipeline failed.",
-        ) from exc
+        ) from None

@@ -11,6 +11,8 @@ env/
 
 # Environment variables / secrets
 .env
+.env.*
+!.env.example
 
 # Jupyter
 .ipynb_checkpoints/
@@ -32,6 +34,11 @@ eval/
 
 # Logs
 *.log
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+*.tmp
 
 # OS / IDE
 .DS_Store

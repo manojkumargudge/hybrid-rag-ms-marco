@@ -7,8 +7,11 @@ __pycache__/
 .git/
 .gitignore
 .env
+.env.*
 .ipynb_checkpoints/
 *.log
+eval/
+models/
 .vscode/
 .DS_Store
 Thumbs.db

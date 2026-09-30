@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 REVIEW_PATH = Path("eval/candidate_review.json")
 QRELS_PATH = Path("eval/qrels.json")
 

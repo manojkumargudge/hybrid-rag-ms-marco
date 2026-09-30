@@ -5,7 +5,6 @@ from app.retrieval.bm25_retriever import BM25Retriever
 from app.retrieval.dense_retriever import DenseRetriever
 from app.retrieval.hybrid_retriever import HybridRetriever
 
-
 PASSAGES_PATH = "data/passages_subset.parquet"
 
 DENSE_INDEX_PATH = "indices/dense_index.faiss"

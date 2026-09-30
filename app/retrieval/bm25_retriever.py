@@ -1,8 +1,10 @@
-from pathlib import Path
 import pickle
 import string
+from pathlib import Path
 
 import pandas as pd
+
+from app.utils.text import repair_mojibake
 
 
 class BM25Retriever:
@@ -143,7 +145,7 @@ class BM25Retriever:
             results.append(
                 {
                     "passage_id": int(row["passage_id"]),
-                    "passage_text": str(row["passage_text"]),
+                    "passage_text": repair_mojibake(str(row["passage_text"])),
                     "score": float(scores[index]),
                 }
             )

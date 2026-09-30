@@ -2,7 +2,6 @@ from pathlib import Path
 
 from app.retrieval.dense_retriever import DenseRetriever
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

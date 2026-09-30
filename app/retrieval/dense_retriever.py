@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 
+from app.utils.text import repair_mojibake
+
 
 class DenseRetriever:
     def __init__(
@@ -61,7 +63,7 @@ class DenseRetriever:
             results.append(
                 {
                     "passage_id": int(row["passage_id"]),
-                    "passage_text": str(row["passage_text"]),
+                    "passage_text": repair_mojibake(str(row["passage_text"])),
                     "score": float(score),
                 }
             )

@@ -2,7 +2,6 @@ from pathlib import Path
 
 from app.retrieval.bm25_retriever import BM25Retriever
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

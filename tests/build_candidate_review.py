@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 CANDIDATE_RESULTS_PATH = Path("eval/candidate_results.txt")
 PASSAGES_PATH = Path("data/passages_subset.parquet")
 OUTPUT_PATH = Path("eval/candidate_review.json")

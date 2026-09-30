@@ -12,3 +12,5 @@ sentence-transformers
 scikit-learn
 httpx
 groq
+pytest
+ruff

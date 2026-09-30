@@ -1,8 +1,7 @@
+from app.reranking.cross_encoder_reranker import CrossEncoderReranker
 from app.retrieval.bm25_retriever import BM25Retriever
 from app.retrieval.dense_retriever import DenseRetriever
 from app.retrieval.hybrid_retriever import HybridRetriever
-from app.reranking.cross_encoder_reranker import CrossEncoderReranker
-
 
 PASSAGES_PATH = "data/passages_subset.parquet"
 
