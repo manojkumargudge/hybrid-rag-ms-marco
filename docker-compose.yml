@@ -1,4 +1,4 @@
-﻿services:
+services:
   hybrid-rag:
     build:
       context: .
@@ -8,4 +8,8 @@
       - "8000:8000"
     env_file:
       - .env
+    volumes:
+      # Artifacts are mounted, never baked into the image.
+      - ./data:/app/data:ro
+      - ./indices:/app/indices:ro
     restart: unless-stopped

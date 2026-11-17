@@ -1,28 +1,29 @@
-﻿FROM python:3.11-slim
+FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/opt/hf-cache
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Hash-locked, CPU-only dependencies (see scripts/lock_deps.sh).
+COPY requirements.lock .
+RUN pip install --no-cache-dir --no-deps --require-hashes \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.lock
 
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir \
-    --index-url https://download.pytorch.org/whl/cpu \
-    torch
-RUN pip install --no-cache-dir -r requirements.txt
+# Bake the pinned model revisions into the image; no HF access at runtime.
+COPY app/__init__.py app/config.py ./app/
+COPY scripts/download_models.py ./scripts/
+RUN python -m scripts.download_models
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
 COPY app ./app
-COPY evaluation ./evaluation
-COPY data ./data
-COPY embeddings ./embeddings
-COPY indices ./indices
 
+# Data and indices are NOT baked in; mount them read-only at runtime
+# (see docker-compose.yml). /ready reports 503 until they are present.
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app
 USER appuser

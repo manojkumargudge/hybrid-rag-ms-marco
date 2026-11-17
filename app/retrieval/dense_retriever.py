@@ -14,11 +14,12 @@ class DenseRetriever:
         index_path: str,
         passages_path: str,
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        model_revision: str | None = None,
     ) -> None:
         self.index_path = Path(index_path)
         self.passages_path = Path(passages_path)
 
-        self.model = SentenceTransformer(model_name)
+        self.model = SentenceTransformer(model_name, revision=model_revision)
 
         self.index = faiss.read_index(str(self.index_path))
 

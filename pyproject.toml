@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+# Only real, hermetic tests live here. Manual smoke scripts are in
+# scripts/manual/ and self-judged eval tooling in evaluation/selfjudged/.
+testpaths = ["tests"]
