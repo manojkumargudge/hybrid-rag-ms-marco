@@ -1,13 +1,10 @@
 ﻿from unittest.mock import Mock
 
-from fastapi.testclient import TestClient
-
+from app.config import settings
 from app.main import app
 
-client = TestClient(app)
 
-
-def test_health_endpoint():
+def test_health_endpoint(client):
     response = client.get("/health")
 
     assert response.status_code == 200
@@ -18,7 +15,7 @@ def test_health_endpoint():
     assert data["service"] == "hybrid-rag"
 
 
-def test_request_id_is_returned_and_metadata_is_non_sensitive():
+def test_request_id_is_returned_and_metadata_is_non_sensitive(client):
     response = client.get(
         "/metadata",
         headers={"X-Request-ID": "test-request-123"},
@@ -33,13 +30,13 @@ def test_request_id_is_returned_and_metadata_is_non_sensitive():
     assert "GROQ_API_KEY" not in response.text
 
 
-def test_trusted_host_rejects_unknown_host():
+def test_trusted_host_rejects_unknown_host(client):
     response = client.get("/health", headers={"host": "malicious.example"})
 
     assert response.status_code == 400
 
 
-def test_query_endpoint():
+def test_query_endpoint(client):
     original_service = app.state.rag_service
     mock_service = Mock()
     mock_service.answer.return_value = {
@@ -77,7 +74,7 @@ def test_query_endpoint():
         app.state.rag_service = original_service
 
 
-def test_empty_query():
+def test_empty_query(client):
     response = client.post(
         "/api/v1/query",
         json={
@@ -88,7 +85,7 @@ def test_empty_query():
     assert response.status_code == 422
 
 
-def test_missing_query():
+def test_missing_query(client):
     response = client.post(
         "/api/v1/query",
         json={},
@@ -97,7 +94,7 @@ def test_missing_query():
     assert response.status_code == 422
 
 
-def test_invalid_query_type():
+def test_invalid_query_type(client):
     response = client.post(
         "/api/v1/query",
         json={
@@ -108,7 +105,7 @@ def test_invalid_query_type():
     assert response.status_code == 422
 
 
-def test_invalid_top_k():
+def test_invalid_top_k(client):
     response = client.post(
         "/api/v1/query",
         json={"query": "test query", "top_k": 0},
@@ -117,7 +114,7 @@ def test_invalid_top_k():
     assert response.status_code == 422
 
 
-def test_query_rejects_long_query():
+def test_query_rejects_long_query(client):
     response = client.post(
         "/api/v1/query",
         json={"query": "x" * 2001},
@@ -126,7 +123,7 @@ def test_query_rejects_long_query():
     assert response.status_code == 422
 
 
-def test_query_rejects_string_top_k():
+def test_query_rejects_string_top_k(client):
     response = client.post(
         "/api/v1/query",
         json={"query": "test query", "top_k": "5"},
@@ -135,7 +132,7 @@ def test_query_rejects_string_top_k():
     assert response.status_code == 422
 
 
-def test_readiness_endpoint_does_not_expose_configuration():
+def test_readiness_endpoint_does_not_expose_configuration(client):
     response = client.get("/ready")
 
     assert response.status_code in {200, 503}
@@ -143,7 +140,7 @@ def test_readiness_endpoint_does_not_expose_configuration():
     assert "indices/" not in response.text
 
 
-def test_query_service_unavailable():
+def test_query_service_unavailable(client):
     original_getter = app.state.get_rag_service
     app.state.get_rag_service = Mock(side_effect=FileNotFoundError("missing index"))
 
@@ -155,7 +152,7 @@ def test_query_service_unavailable():
         app.state.get_rag_service = original_getter
 
 
-def test_query_service_value_error():
+def test_query_service_value_error(client):
     original_service = app.state.rag_service
 
     mock_service = Mock()
@@ -180,7 +177,7 @@ def test_query_service_value_error():
         app.state.rag_service = original_service
 
 
-def test_query_service_internal_error():
+def test_query_service_internal_error(client):
     original_service = app.state.rag_service
 
     mock_service = Mock()
@@ -205,8 +202,17 @@ def test_query_service_internal_error():
         app.state.rag_service = original_service
 
 
-def test_rate_limit_returns_429_after_configured_limit():
-    responses = [client.get("/metadata") for _ in range(61)]
+def test_rate_limit_returns_429_after_configured_limit(client):
+    limit = settings.rate_limit_requests
+    responses = [client.get("/metadata") for _ in range(limit + 1)]
 
+    assert all(r.status_code == 200 for r in responses[:limit])
     assert responses[-1].status_code == 429
-    assert responses[-1].headers["Retry-After"] == "60"
+    assert responses[-1].headers["Retry-After"] == str(
+        settings.rate_limit_window_seconds
+    )
+
+
+def test_rate_limit_is_per_client(client):
+    """A fresh client is not affected by another client's usage."""
+    assert client.get("/metadata").status_code == 200

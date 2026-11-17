@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # Pinned Hugging Face commit SHAs; the Docker image bakes exactly these.
+    embedding_model_revision: str = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+    reranker_model_revision: str = "233902d25c440f23af6f7d6e94d2946bac0bee0a"
     application_version: str = "1.0.0"
     git_version: str = "unknown"
 

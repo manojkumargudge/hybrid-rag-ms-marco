@@ -62,6 +62,7 @@ def create_rag_service() -> RAGService:
         index_path=settings.dense_index_path,
         passages_path=settings.passages_path,
         model_name=settings.embedding_model,
+        model_revision=settings.embedding_model_revision,
     )
 
     bm25_retriever = BM25Retriever(
@@ -76,7 +77,10 @@ def create_rag_service() -> RAGService:
         rrf_k=settings.rrf_k,
     )
 
-    reranker = CrossEncoderReranker(model_name=settings.reranker_model)
+    reranker = CrossEncoderReranker(
+        model_name=settings.reranker_model,
+        model_revision=settings.reranker_model_revision,
+    )
 
     generator = GroqGenerator(
         model_name=settings.groq_model,

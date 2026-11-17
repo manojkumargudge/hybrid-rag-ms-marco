@@ -4,19 +4,52 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - name: Install locked dependencies (hash-checked)
+        run: >
+          pip install --no-deps --require-hashes
+          --extra-index-url https://download.pytorch.org/whl/cpu
+          -r requirements-dev.lock
+      - name: Check lockfiles match requirements
+        run: |
+          pip install uv==0.13.8
+          sh scripts/lock_deps.sh
+          git diff --exit-code -- requirements.lock requirements-dev.lock
       - name: Lint
-        run: ruff check app evaluation tests
+        run: ruff check app evaluation tests scripts
       - name: Test
         run: pytest -q
-      - name: Build image
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image (no data/indices in context)
         run: docker build -t hybrid-rag:ci .
+      - name: Pinned models load offline from the image
+        run: >
+          docker run --rm hybrid-rag:ci python -c
+          "from app.config import settings as s;
+          from sentence_transformers import SentenceTransformer, CrossEncoder;
+          SentenceTransformer(s.embedding_model, revision=s.embedding_model_revision);
+          CrossEncoder(s.reranker_model, revision=s.reranker_model_revision);
+          print('models ok')"
+      - name: Container smoke test
+        run: |
+          docker run -d --name rag -p 8000:8000 hybrid-rag:ci
+          for i in $(seq 1 30); do curl -fs localhost:8000/health && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/health)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/ready)" = 503
+          docker rm -f rag
