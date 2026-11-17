@@ -11,5 +11,5 @@ services:
     volumes:
       # Artifacts are mounted, never baked into the image. Every file is
       # sha256-checked against manifest.json before it is loaded.
-      - ./artifacts/v2:/app/artifacts/v2:ro
+      - ./artifacts/v3:/app/artifacts/v3:ro
     restart: unless-stopped

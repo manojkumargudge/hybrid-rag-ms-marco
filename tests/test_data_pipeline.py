@@ -60,20 +60,68 @@ def test_splits_sources_and_counts(tmp_path):
     assert manifest["params"]["seed_queries"] == 42
 
 
-def test_hard_negatives_exclude_relevant_and_are_bm25_ranked(tmp_path):
-    raw, out = tmp_path / "raw", tmp_path / "v2"
+def _hard_by_query(out):
+    hard = pd.read_csv(out / "hard_negatives.tsv", sep="\t", header=None)
+    return {qid: set(group[1]) for qid, group in hard.groupby(0)}
+
+
+def _pools_and_qrels(raw):
+    top = pd.read_csv(raw / "top1000.dev", sep="\t", header=None)
+    qrels = pd.read_csv(raw / "qrels.dev.small.tsv", sep="\t", header=None)
+    pools = {qid: set(group[1]) for qid, group in top.groupby(0)}
+    relevant = {qid: set(group[2]) for qid, group in qrels.groupby(0)}
+    return pools, relevant
+
+
+def test_hard_negatives_are_seeded_sample_of_own_pool(tmp_path):
+    raw, out = tmp_path / "raw", tmp_path / "v3"
     write_raw_fixture(raw)
-    manifest = _prepare(raw, out, hard_per_query=1)
-    passages = pd.read_parquet(out / "passages.parquet")
-    hard = set(passages.loc[passages["source"] == "hard", "passage_id"])
+    manifest = _prepare(raw, out)
+    pools, relevant = _pools_and_qrels(raw)
+    hard = _hard_by_query(out)
+
     sampled = set()
     for name in ("queries_eval.tsv", "queries_tune.tsv"):
         sampled |= set(pd.read_csv(out / name, sep="\t", header=None)[0])
-    # In the fixture, pid 40+i is the only pool passage sharing query i's
-    # topic words, so BM25 must rank it first; the relevant pid i is excluded.
-    assert hard == {40 + (qid - 1000) for qid in sampled}
+    assert set(hard) == sampled
+    for qid, pids in hard.items():
+        assert len(pids) == 3
+        assert pids <= pools[qid] - relevant[qid]
+
+    source = pd.read_parquet(out / "passages.parquet").set_index("passage_id")["source"]
+    all_hard = set().union(*hard.values())
+    assert set(source[source == "hard"].index) <= all_hard
+    assert "top1000.dev" in manifest["params"]["hard_negative_rule"]
     # Relevant passage is the LAST line of every fixture pool.
     assert manifest["top1000_order_check"]["mean_relative_position_of_relevant"] == 1.0
+
+
+def test_hard_negatives_ignore_file_order_and_depend_on_seed(tmp_path):
+    raw = tmp_path / "raw"
+    write_raw_fixture(raw)
+    _prepare(raw, tmp_path / "a")
+    baseline = _hard_by_query(tmp_path / "a")
+
+    lines = (raw / "top1000.dev").read_text(encoding="utf-8").splitlines(keepends=True)
+    (raw / "top1000.dev").write_text("".join(reversed(lines)), encoding="utf-8")
+    _prepare(raw, tmp_path / "b")
+    assert _hard_by_query(tmp_path / "b") == baseline
+
+    # Another seed also changes which queries are sampled; compare only the
+    # queries both runs share.
+    _prepare(raw, tmp_path / "c", seed=7)
+    other = _hard_by_query(tmp_path / "c")
+    shared = baseline.keys() & other.keys()
+    assert shared
+    assert any(baseline[qid] != other[qid] for qid in shared)
+
+
+def test_every_qrel_passage_is_in_corpus(tmp_path):
+    raw, out = tmp_path / "raw", tmp_path / "v3"
+    write_raw_fixture(raw)
+    manifest = _prepare(raw, out)
+    counts = manifest["counts"]
+    assert counts["qrel_passages_in_corpus"] == counts["qrel_passages_unique"] > 0
 
 
 def test_text_is_normalized(tmp_path):

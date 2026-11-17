@@ -1,8 +1,10 @@
-"""Build the v2 MS MARCO passage subset and its eval/tune query splits.
+"""Build the MS MARCO passage subset and its eval/tune query splits.
 
 Corpus = relevant passages of the sampled queries (qrels.dev.small)
-       + top-N hard negatives per sampled query from top1000.dev
-         (pool re-ranked with BM25, because top1000.dev has no scores)
+       + N hard negatives per sampled query: a seeded uniform random sample
+         of the non-relevant passages in that query's official top1000.dev
+         pool (no re-ranking by any of our retrievers, so the corpus is not
+         tuned toward or against our BM25 or dense models)
        + seeded random passages from the full collection up to --target-size.
 
 Every passage is labelled with its source (relevant / hard / random), and
@@ -12,6 +14,7 @@ Outputs (in --out-dir):
     passages.parquet          passage_id (int64), passage_text, source
     queries_{eval,tune}.tsv   qid <TAB> query
     qrels_{eval,tune}.tsv     TREC format: qid 0 pid 1
+    hard_negatives.tsv        qid <TAB> pid  (which query each was drawn for)
     manifest.json
 
 Refuses to overwrite an existing output directory unless --force.
@@ -22,9 +25,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-import heapq
 import json
-import math
 import random
 import sys
 from collections import Counter, defaultdict
@@ -33,7 +34,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.retrieval.bm25_retriever import BM25Retriever
 from app.utils.text import repair_mojibake
 
 OUTPUT_FILES = (
@@ -42,18 +42,18 @@ OUTPUT_FILES = (
     "queries_tune.tsv",
     "qrels_eval.tsv",
     "qrels_tune.tsv",
+    "hard_negatives.tsv",
     "manifest.json",
 )
 
-# Anserini's MS MARCO passage defaults.
-BM25_K1 = 0.9
-BM25_B = 0.4
+HARD_NEGATIVE_RULE = (
+    "For each sampled query (eval and tune): take the unique passage ids in its "
+    "official top1000.dev pool, drop that query's relevant passages, sort by "
+    "passage_id, then random.Random(f'{seed}:{qid}').sample(pool, "
+    "min(hard_per_query, len(pool))). File order and scores are not used."
+)
 
 csv.field_size_limit(sys.maxsize if sys.maxsize < 2**31 else 2**31 - 1)
-
-
-def tokenize(text: str) -> list[str]:
-    return BM25Retriever._tokenize(text)
 
 
 def sha256_file(path: Path) -> str:
@@ -94,96 +94,55 @@ def sample_queries(
     return sorted(sampled[:n_eval]), sorted(sampled[n_eval:])
 
 
-def iter_pool_lines(path: Path, wanted: set[int]):
-    for qid, pid, _query, passage in read_tsv(path):
-        qid_i = int(qid)
-        if qid_i in wanted:
-            yield qid_i, int(pid), passage
-
-
-def bm25_hard_negatives(
-    path: Path,
-    queries: dict[int, str],
-    wanted: set[int],
-    qrels: dict[int, set[int]],
-    per_query: int,
+def load_pools(
+    path: Path, wanted: set[int], qrels: dict[int, set[int]]
 ) -> tuple[dict[int, list[int]], dict]:
-    """Rank each wanted query's top1000 pool with BM25; keep top non-relevant.
+    """Unique pool passage ids per wanted query (one streaming pass).
 
-    Streams the file twice (memory stays small):
-      1. document frequencies / lengths over the union of wanted pools, and
-         where relevant passages sit in file order (if the file were
-         rank-ordered they would cluster near position 0);
-      2. score every candidate line, keeping a per-query heap.
-    Ties are broken by lower passage_id.
+    Also records where relevant passages sit in file order (if the file were
+    rank-ordered they would cluster near position 0); informational only.
     """
-    seen: set[int] = set()
-    df: Counter[str] = Counter()
-    total_len = 0
+    pools: dict[int, dict[int, None]] = defaultdict(dict)
     lines_per_query: Counter[int] = Counter()
     relevant_hits: list[tuple[int, int]] = []
-    for qid, pid, passage in iter_pool_lines(path, wanted):
-        position = lines_per_query[qid]
+    for row in read_tsv(path):
+        qid = int(row[0])
+        if qid not in wanted:
+            continue
+        pid = int(row[1])
+        if pid in qrels.get(qid, ()):
+            relevant_hits.append((qid, lines_per_query[qid]))
         lines_per_query[qid] += 1
-        if pid in qrels.get(qid, ()):
-            relevant_hits.append((qid, position))
-        if pid not in seen:
-            seen.add(pid)
-            tokens = tokenize(repair_mojibake(passage))
-            df.update(set(tokens))
-            total_len += len(tokens)
+        pools[qid][pid] = None
 
-    n_docs = len(seen)
-    del seen
-    avgdl = total_len / max(1, n_docs)
-    idf_cache: dict[str, float] = {}
-
-    def idf(term: str) -> float:
-        if term not in idf_cache:
-            n = df.get(term, 0)
-            idf_cache[term] = math.log((n_docs - n + 0.5) / (n + 0.5) + 1.0)
-        return idf_cache[term]
-
-    query_terms = {qid: tokenize(queries[qid]) for qid in wanted}
-    heaps: dict[int, list[tuple[float, int]]] = defaultdict(list)
-    for qid, pid, passage in iter_pool_lines(path, wanted):
-        if pid in qrels.get(qid, ()):
-            continue
-        heap = heaps[qid]
-        if any(entry[1] == -pid for entry in heap):
-            continue
-        tokens = tokenize(repair_mojibake(passage))
-        tf = Counter(tokens)
-        norm = BM25_K1 * (1 - BM25_B + BM25_B * len(tokens) / avgdl)
-        score = sum(
-            idf(term) * tf[term] * (BM25_K1 + 1) / (tf[term] + norm)
-            for term in query_terms[qid]
-            if term in tf
-        )
-        # Min-heap root = worst kept: lowest score, then highest pid.
-        entry = (score, -pid)
-        if len(heap) < per_query:
-            heapq.heappush(heap, entry)
-        elif entry > heap[0]:
-            heapq.heapreplace(heap, entry)
-
-    hard = {
-        qid: [-neg_pid for _, neg_pid in sorted(heap, key=lambda e: (-e[0], -e[1]))]
-        for qid, heap in heaps.items()
-    }
     positions = [
         position / max(1, lines_per_query[qid] - 1) for qid, position in relevant_hits
     ]
     order_check = {
-        "queries_with_pool": len(lines_per_query),
-        "pool_union_size": n_docs,
+        "queries_with_pool": len(pools),
+        "pool_union_size": len({pid for pool in pools.values() for pid in pool}),
         "relevant_found_in_pool": len(positions),
         "mean_relative_position_of_relevant": (
             round(sum(positions) / len(positions), 4) if positions else None
         ),
         "note": "0.0 = always first line, ~0.5 = no rank order in file order",
     }
-    return hard, order_check
+    return {qid: list(pool) for qid, pool in pools.items()}, order_check
+
+
+def sample_hard_negatives(
+    pools: dict[int, list[int]],
+    qrels: dict[int, set[int]],
+    per_query: int,
+    seed: int,
+) -> dict[int, list[int]]:
+    """See HARD_NEGATIVE_RULE."""
+    hard = {}
+    for qid in sorted(pools):
+        pool = sorted(set(pools[qid]) - qrels.get(qid, set()))
+        rng = random.Random(f"{seed}:{qid}")
+        hard[qid] = rng.sample(pool, min(per_query, len(pool)))
+    return hard
 
 
 def count_collection(path: Path) -> int:
@@ -246,9 +205,8 @@ def prepare(
     eval_qids, tune_qids = sample_queries(usable, n_eval, n_tune, seed)
     selected = set(eval_qids) | set(tune_qids)
 
-    hard, order_check = bm25_hard_negatives(
-        raw_dir / top1000_name, queries_all, selected, qrels_all, hard_per_query
-    )
+    pools, order_check = load_pools(raw_dir / top1000_name, selected, qrels_all)
+    hard = sample_hard_negatives(pools, qrels_all, hard_per_query, seed)
 
     source: dict[int, str] = {}
     for qid in sorted(selected):
@@ -268,8 +226,7 @@ def prepare(
     # remain; keep draw order (deterministic, no 8.8M-element list).
     rng = random.Random(seed + 1)
     draws = rng.sample(range(collection_size), min(collection_size, n_random + len(source)))
-    random_pids = [pid for pid in draws if pid not in source][:n_random]
-    for pid in random_pids:
+    for pid in [pid for pid in draws if pid not in source][:n_random]:
         source[pid] = "random"
 
     texts = collect_texts(collection, set(source))
@@ -281,13 +238,23 @@ def prepare(
             "source": [source[pid] for pid in passage_ids],
         }
     )
-    frame.to_parquet(out_dir / "passages.parquet", index=False)
 
+    qrel_pids = {pid for qid in selected for pid in qrels_all[qid]}
+    missing_qrels = qrel_pids - set(passage_ids)
+    if missing_qrels:
+        raise ValueError(f"{len(missing_qrels)} qrel passages missing from corpus.")
+
+    frame.to_parquet(out_dir / "passages.parquet", index=False)
     write_queries(out_dir / "queries_eval.tsv", eval_qids, queries_all)
     write_queries(out_dir / "queries_tune.tsv", tune_qids, queries_all)
     write_qrels(out_dir / "qrels_eval.tsv", eval_qids, qrels_all)
     write_qrels(out_dir / "qrels_tune.tsv", tune_qids, qrels_all)
+    with (out_dir / "hard_negatives.tsv").open("w", encoding="utf-8", newline="\n") as fh:
+        for qid in sorted(hard):
+            for pid in hard[qid]:
+                fh.write(f"{qid}\t{pid}\n")
 
+    hard_draws = sum(len(pids) for pids in hard.values())
     downloads_path = raw_dir / "downloads.json"
     manifest = {
         "version": out_dir.name,
@@ -304,13 +271,12 @@ def prepare(
         },
         "params": {
             "seed_queries": seed,
+            "seed_hard_negatives": f"'{seed}:<qid>' per query",
             "seed_random_passages": seed + 1,
             "n_eval_queries": n_eval,
             "n_tune_queries": n_tune,
             "hard_negatives_per_query": hard_per_query,
-            "hard_negative_ranking": f"BM25 k1={BM25_K1} b={BM25_B}, IDF over union "
-            "of selected top1000.dev pools, app tokenizer, relevant excluded, "
-            "ties by passage_id",
+            "hard_negative_rule": HARD_NEGATIVE_RULE,
             "target_size": target_size,
             "text_normalization": "app.utils.text.repair_mojibake",
         },
@@ -322,6 +288,11 @@ def prepare(
             "tune_queries": len(tune_qids),
             "eval_qrels": sum(len(qrels_all[q]) for q in eval_qids),
             "tune_qrels": sum(len(qrels_all[q]) for q in tune_qids),
+            "qrel_passages_unique": len(qrel_pids),
+            "qrel_passages_in_corpus": len(qrel_pids & set(passage_ids)),
+            "hard_negative_draws": hard_draws,
+            "hard_negative_draws_already_selected": hard_draws
+            - Counter(source.values())["hard"],
             "passages": len(frame),
             "by_source": dict(Counter(frame["source"])),
         },
@@ -340,7 +311,7 @@ def prepare(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-dir", type=Path, default=Path("artifacts/raw"))
-    parser.add_argument("--out-dir", type=Path, default=Path("artifacts/v2"))
+    parser.add_argument("--out-dir", type=Path, default=Path("artifacts/v3"))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-eval", type=int, default=1000)
     parser.add_argument("--n-tune", type=int, default=500)

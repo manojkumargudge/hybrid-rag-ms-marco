@@ -16,13 +16,13 @@ class Settings(BaseSettings):
     git_version: str = "unknown"
 
     # Built by scripts/prepare_data.py + scripts/build_indices.py.
-    manifest_path: str = "artifacts/v2/manifest.json"
-    passages_path: str = "artifacts/v2/passages.parquet"
-    dense_index_path: str = "artifacts/v2/dense_index.faiss"
-    bm25_index_path: str = "artifacts/v2/bm25/bm25_index.pkl"
-    bm25_corpus_path: str = "artifacts/v2/bm25/tokenized_corpus.pkl"
-    index_version: str = "v2"
-    data_version: str = "v2"
+    manifest_path: str = "artifacts/v3/manifest.json"
+    passages_path: str = "artifacts/v3/passages.parquet"
+    dense_index_path: str = "artifacts/v3/dense_index.faiss"
+    bm25_index_path: str = "artifacts/v3/bm25/bm25_index.pkl"
+    bm25_corpus_path: str = "artifacts/v3/bm25/tokenized_corpus.pkl"
+    index_version: str = "v3"
+    data_version: str = "v3"
 
     retrieval_k: int = 20
     hybrid_top_k: int = 10

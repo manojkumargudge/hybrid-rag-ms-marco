@@ -111,7 +111,7 @@ def build_dense(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dir", type=Path, default=Path("artifacts/v2"))
+    parser.add_argument("--dir", type=Path, default=Path("artifacts/v3"))
     parser.add_argument("--only", choices=["bm25", "dense"], required=True)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument(

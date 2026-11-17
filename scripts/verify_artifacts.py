@@ -1,6 +1,6 @@
 """Verify an artifacts directory: sha256 of every manifest file + alignment.
 
-Usage: python -m scripts.verify_artifacts [--dir artifacts/v2]
+Usage: python -m scripts.verify_artifacts [--dir artifacts/v3]
 """
 
 import argparse
@@ -16,7 +16,7 @@ from app.artifacts import verify_artifacts
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dir", type=Path, default=Path("artifacts/v2"))
+    parser.add_argument("--dir", type=Path, default=Path("artifacts/v3"))
     args = parser.parse_args()
 
     manifest_path = args.dir / "manifest.json"
