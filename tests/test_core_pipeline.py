@@ -74,3 +74,29 @@ def test_rag_service_rejects_non_positive_top_k():
 def test_repair_mojibake_preserves_valid_text():
     assert repair_mojibake("chÃ¢teaux") == "châteaux"
     assert repair_mojibake("plain text") == "plain text"
+
+
+def _ranked(ids):
+    return [{"passage_id": i, "passage_text": str(i), "score": 0.0} for i in ids]
+
+
+def test_weighted_rrf_half_weight_equals_standard_rrf():
+    dense, bm25 = Mock(), Mock()
+    dense.retrieve.return_value = _ranked([1, 2, 3])
+    bm25.retrieve.return_value = _ranked([3, 4, 1])
+    standard = HybridRetriever(dense, bm25, rrf_k=60).retrieve("q", top_k=4)
+    weighted = HybridRetriever(dense, bm25, rrf_k=60, dense_weight=0.5).retrieve("q", top_k=4)
+    assert standard == weighted
+    assert standard[0]["score"] == pytest.approx(1 / 61 + 1 / 63)
+
+
+def test_weighted_rrf_extremes_follow_one_retriever():
+    dense, bm25 = Mock(), Mock()
+    dense.retrieve.return_value = _ranked([1, 2, 3])
+    bm25.retrieve.return_value = _ranked([3, 2, 1])
+    only_dense = HybridRetriever(dense, bm25, dense_weight=1.0).retrieve("q", top_k=3)
+    only_bm25 = HybridRetriever(dense, bm25, dense_weight=0.0).retrieve("q", top_k=3)
+    assert [r["passage_id"] for r in only_dense] == [1, 2, 3]
+    assert [r["passage_id"] for r in only_bm25] == [3, 2, 1]
+    with pytest.raises(ValueError):
+        HybridRetriever(dense, bm25, dense_weight=1.5)

@@ -12,13 +12,21 @@ class HybridRetriever:
         dense_retriever: Any,
         bm25_retriever: Any,
         rrf_k: int = 60,
+        dense_weight: float = 0.5,
     ) -> None:
         if rrf_k <= 0:
             raise ValueError("rrf_k must be greater than zero.")
 
+        if not 0.0 <= dense_weight <= 1.0:
+            raise ValueError("dense_weight must be between 0 and 1.")
+
         self.dense_retriever = dense_retriever
         self.bm25_retriever = bm25_retriever
         self.rrf_k = rrf_k
+        # Weighted RRF: 2*w / (k + rank_dense) + 2*(1 - w) / (k + rank_bm25).
+        # w = 0.5 is exactly standard (unweighted) RRF.
+        self.dense_scale = 2.0 * dense_weight
+        self.bm25_scale = 2.0 * (1.0 - dense_weight)
 
     def retrieve(
         self,
@@ -69,7 +77,7 @@ class HybridRetriever:
         for rank, result in enumerate(dense_results, start=1):
             passage_id = int(result["passage_id"])
 
-            rrf_score = 1.0 / (self.rrf_k + rank)
+            rrf_score = self.dense_scale / (self.rrf_k + rank)
 
             rrf_scores[passage_id] = (
                 rrf_scores.get(passage_id, 0.0) + rrf_score
@@ -85,7 +93,7 @@ class HybridRetriever:
         for rank, result in enumerate(bm25_results, start=1):
             passage_id = int(result["passage_id"])
 
-            rrf_score = 1.0 / (self.rrf_k + rank)
+            rrf_score = self.bm25_scale / (self.rrf_k + rank)
 
             rrf_scores[passage_id] = (
                 rrf_scores.get(passage_id, 0.0) + rrf_score
