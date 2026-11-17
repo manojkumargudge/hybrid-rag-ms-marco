@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
+from app.artifacts import verify_artifacts
 from app.config import settings
 from app.generation.groq_generator import GroqGenerator
 from app.middleware import ProductionMiddleware, request_id_context
@@ -58,6 +59,14 @@ _configure_logging()
 def create_rag_service() -> RAGService:
     """Initialize the complete Hybrid RAG pipeline."""
 
+    # Served corpus must be exactly the evaluated one (BM25 pickles are
+    # verified inside BM25Retriever before unpickling).
+    verify_artifacts(
+        settings.manifest_path,
+        settings.passages_path,
+        settings.dense_index_path,
+    )
+
     dense_retriever = DenseRetriever(
         index_path=settings.dense_index_path,
         passages_path=settings.passages_path,
@@ -69,6 +78,7 @@ def create_rag_service() -> RAGService:
         index_path=settings.bm25_index_path,
         corpus_path=settings.bm25_corpus_path,
         passages_path=settings.passages_path,
+        manifest_path=settings.manifest_path,
     )
 
     hybrid_retriever = HybridRetriever(
@@ -174,6 +184,7 @@ def readiness_check() -> JSONResponse:
     """Report whether configured RAG artifacts and generation are available."""
 
     required_paths = {
+        "manifest": settings.manifest_path,
         "passages": settings.passages_path,
         "dense_index": settings.dense_index_path,
         "bm25_index": settings.bm25_index_path,

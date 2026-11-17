@@ -15,12 +15,14 @@ class Settings(BaseSettings):
     application_version: str = "1.0.0"
     git_version: str = "unknown"
 
-    passages_path: str = "data/passages_subset.parquet"
-    dense_index_path: str = "indices/dense_index.faiss"
-    bm25_index_path: str = "indices/bm25/bm25_index.pkl"
-    bm25_corpus_path: str = "indices/bm25/tokenized_corpus.pkl"
-    index_version: str = "v1"
-    data_version: str = "v1"
+    # Built by scripts/prepare_data.py + scripts/build_indices.py.
+    manifest_path: str = "artifacts/v2/manifest.json"
+    passages_path: str = "artifacts/v2/passages.parquet"
+    dense_index_path: str = "artifacts/v2/dense_index.faiss"
+    bm25_index_path: str = "artifacts/v2/bm25/bm25_index.pkl"
+    bm25_corpus_path: str = "artifacts/v2/bm25/tokenized_corpus.pkl"
+    index_version: str = "v2"
+    data_version: str = "v2"
 
     retrieval_k: int = 20
     hybrid_top_k: int = 10

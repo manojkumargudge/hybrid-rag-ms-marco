@@ -9,7 +9,7 @@ services:
     env_file:
       - .env
     volumes:
-      # Artifacts are mounted, never baked into the image.
-      - ./data:/app/data:ro
-      - ./indices:/app/indices:ro
+      # Artifacts are mounted, never baked into the image. Every file is
+      # sha256-checked against manifest.json before it is loaded.
+      - ./artifacts/v2:/app/artifacts/v2:ro
     restart: unless-stopped
