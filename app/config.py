@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
     groq_api_key: str = ""
+    api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
