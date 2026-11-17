@@ -25,6 +25,7 @@ data/*.json
 embeddings/
 indices/
 models/
+artifacts/
 
 # Evaluation outputs
 eval/

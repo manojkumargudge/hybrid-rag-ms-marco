@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.artifacts import verify_artifacts
 from app.utils.text import repair_mojibake
 
 
@@ -13,10 +14,15 @@ class BM25Retriever:
         index_path: str,
         corpus_path: str,
         passages_path: str,
+        manifest_path: str,
     ) -> None:
         self.index_path = Path(index_path)
         self.corpus_path = Path(corpus_path)
         self.passages_path = Path(passages_path)
+
+        # pickle executes code on load: only unpickle files whose sha256
+        # matches the build manifest.
+        verify_artifacts(manifest_path, self.index_path, self.corpus_path)
 
         # Load pre-built BM25 index
         with open(self.index_path, "rb") as file:

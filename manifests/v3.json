@@ -1,0 +1,104 @@
+{
+  "version": "v3",
+  "created_at": "2026-11-17T08:37:04.628051+00:00",
+  "builder": "scripts/prepare_data.py",
+  "sources": {
+    "collectionandqueries.tar.gz": {
+      "url": "https://msmarco.z22.web.core.windows.net/msmarcoranking/collectionandqueries.tar.gz",
+      "bytes": 1057717952,
+      "md5": "31644046b18952c1386cd4564ba2ae69",
+      "md5_reference": "ir_datasets/etc/downloads.json",
+      "sha256": "decac356eb8cc5b9cea2e30b8738dc6f367e4147aaefe8fc7526ddda382fd2fc",
+      "extracted": {
+        "collection.tsv": "86e0c5820be6b22280337a67e54cbb626645453d9ac3c377bac45abb81c5653d",
+        "qrels.dev.small.tsv": "ddc607dbe7b748d7168e8675a242f0811d47febaa2e69d3af09d7ab249c68d7e",
+        "qrels.train.tsv": "641b3c9391ea19e4a3d9e3284299f07be6725ff2dd11591a3d4d3f293db17cf2",
+        "queries.dev.small.tsv": "f4f71fa87b6be4fb968cca2b8f8554c4ebd003e6c3488af3ac1cc5629c3de189",
+        "queries.dev.tsv": "757b7e935ff46728be84cbf7d195c3e6ae479d6449d92bbb87b09fe56bebf5ee",
+        "queries.eval.small.tsv": "f609641596c3537b35cd55df9e87ca9a7ec3c7dd040ce341ab36658deb27153a",
+        "queries.eval.tsv": "1e5832c9416c16fc2c77ad585a4b7606cea06126eca005b6ab2acd9a80ea9a42",
+        "queries.train.tsv": "4583ebd42180bf0de26a06024d4679fdf627f33cce4b0048ae4c6fc85254506a"
+      }
+    },
+    "top1000.dev.tar.gz": {
+      "url": "https://msmarco.z22.web.core.windows.net/msmarcoranking/top1000.dev.tar.gz",
+      "bytes": 687414398,
+      "md5": "8c140662bdf123a98fbfe3bb174c5831",
+      "md5_reference": "ir_datasets/etc/downloads.json",
+      "sha256": "56f8a4e5a4e0453f9be3539739ed86f271711856ac3b537ed58f79eea1ee8763",
+      "extracted": {
+        "top1000.dev": "11074c610104831a472788b43f0babad4dcf6c3b512ffa35c5398182534531a4"
+      }
+    }
+  },
+  "inputs": {
+    "collection.tsv": "86e0c5820be6b22280337a67e54cbb626645453d9ac3c377bac45abb81c5653d",
+    "queries.dev.small.tsv": "f4f71fa87b6be4fb968cca2b8f8554c4ebd003e6c3488af3ac1cc5629c3de189",
+    "qrels.dev.small.tsv": "ddc607dbe7b748d7168e8675a242f0811d47febaa2e69d3af09d7ab249c68d7e",
+    "top1000.dev": "11074c610104831a472788b43f0babad4dcf6c3b512ffa35c5398182534531a4"
+  },
+  "params": {
+    "seed_queries": 42,
+    "seed_hard_negatives": "'42:<qid>' per query",
+    "seed_random_passages": 43,
+    "n_eval_queries": 1000,
+    "n_tune_queries": 500,
+    "hard_negatives_per_query": 50,
+    "hard_negative_rule": "For each sampled query (eval and tune): take the unique passage ids in its official top1000.dev pool, drop that query's relevant passages, sort by passage_id, then random.Random(f'{seed}:{qid}').sample(pool, min(hard_per_query, len(pool))). File order and scores are not used.",
+    "target_size": 150000,
+    "text_normalization": "app.utils.text.repair_mojibake"
+  },
+  "top1000_order_check": {
+    "queries_with_pool": 1500,
+    "pool_union_size": 1217287,
+    "relevant_found_in_pool": 1323,
+    "mean_relative_position_of_relevant": 0.5358,
+    "note": "0.0 = always first line, ~0.5 = no rank order in file order"
+  },
+  "counts": {
+    "collection_size": 8841823,
+    "dev_small_queries_usable": 6980,
+    "eval_queries": 1000,
+    "tune_queries": 500,
+    "eval_qrels": 1074,
+    "tune_qrels": 541,
+    "qrel_passages_unique": 1613,
+    "qrel_passages_in_corpus": 1613,
+    "hard_negative_draws": 74063,
+    "hard_negative_draws_already_selected": 1096,
+    "passages": 150000,
+    "by_source": {
+      "random": 75420,
+      "hard": 72967,
+      "relevant": 1613
+    }
+  },
+  "files": {
+    "passages.parquet": "601d26df2b69e1d718380ae41cb323bca9b1efa081843b4caa9a669a8714035f",
+    "queries_eval.tsv": "a176e488263d0773cb2c35c7542247b6578d7f9e67b0350bbdc21ef51a31ef3a",
+    "queries_tune.tsv": "2647df130bb1b987e9ef214824fc6ed1bf44dff23072f6f3bfb0f55e651da0b3",
+    "qrels_eval.tsv": "2b340548387aa2dec5cdfbe7bc52a757a47fe329bdaf4aaf113f24d993f832b6",
+    "qrels_tune.tsv": "22cb557ae19f0361f7ea249add13f93752f01f486161353b8e3ae39c1e2d344c",
+    "hard_negatives.tsv": "eb94acc10b2a7a49340991538911f809901e8a06bec13b25386bdbb65b554586",
+    "bm25/bm25_index.pkl": "1fcb37ca6b11866c3cf9c65fad7e2caec4c7b030e48c2bb1d301a3a5eabfc407",
+    "bm25/tokenized_corpus.pkl": "6d792e79e3c8edf0320fd8e6670329f3a240a0e46f1232c07e4d2979baaf4258",
+    "dense_index.faiss": "a8330b31f54df76209a072097fff8bd6f24e4e55533587a0b08a9898e72f4a21"
+  },
+  "indices": {
+    "bm25": {
+      "library": "rank_bm25.BM25Okapi (defaults k1=1.5 b=0.75 epsilon=0.25)",
+      "tokenizer": "app.retrieval.bm25_retriever.BM25Retriever._tokenize",
+      "documents": 150000,
+      "build_seconds": 8.5
+    },
+    "dense": {
+      "model": "sentence-transformers/all-MiniLM-L6-v2",
+      "model_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+      "index": "faiss.IndexFlatIP over L2-normalized embeddings (cosine)",
+      "dimension": 384,
+      "vectors": 150000,
+      "batch_size": 32,
+      "build_seconds": 3295.4
+    }
+  }
+}
