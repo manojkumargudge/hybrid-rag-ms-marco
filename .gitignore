@@ -27,8 +27,13 @@ indices/
 models/
 artifacts/
 
-# Evaluation outputs
-eval/
+# Evaluation outputs: everything ignored except committed eval results
+# (eval/results/<run>/metrics.json and per_query.jsonl).
+eval/*
+!eval/results/
+eval/results/*/*
+!eval/results/*/metrics.json
+!eval/results/*/per_query.jsonl
 *.pkl
 *.npy
 *.faiss

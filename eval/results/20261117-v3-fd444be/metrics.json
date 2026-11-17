@@ -1,0 +1,320 @@
+{
+  "run": "20261117-v3-fd444be",
+  "created_at": "2026-11-17T10:20:15.810341+00:00",
+  "git": {
+    "commit": "fd444be5cc0446e4c6683e768d721b43dcaaa66f",
+    "dirty": false
+  },
+  "corpus": {
+    "version": "v3",
+    "manifest_sha256": "3ab42d5b6b586d59ecc35a39a2565a010637a4a68ce0899ee49ef1a0a8dfce82",
+    "passages": 150000,
+    "files_sha256": {
+      "passages.parquet": "601d26df2b69e1d718380ae41cb323bca9b1efa081843b4caa9a669a8714035f",
+      "dense_index.faiss": "a8330b31f54df76209a072097fff8bd6f24e4e55533587a0b08a9898e72f4a21",
+      "bm25/bm25_index.pkl": "1fcb37ca6b11866c3cf9c65fad7e2caec4c7b030e48c2bb1d301a3a5eabfc407",
+      "bm25/tokenized_corpus.pkl": "6d792e79e3c8edf0320fd8e6670329f3a240a0e46f1232c07e4d2979baaf4258",
+      "queries_eval.tsv": "a176e488263d0773cb2c35c7542247b6578d7f9e67b0350bbdc21ef51a31ef3a",
+      "qrels_eval.tsv": "2b340548387aa2dec5cdfbe7bc52a757a47fe329bdaf4aaf113f24d993f832b6",
+      "queries_tune.tsv": "2647df130bb1b987e9ef214824fc6ed1bf44dff23072f6f3bfb0f55e651da0b3"
+    }
+  },
+  "split": "eval (official MS MARCO dev-small qrels); tune split not used",
+  "n_queries": 1000,
+  "n_bm25_empty_queries": 0,
+  "config": {
+    "depth": 100,
+    "rrf_k": 60,
+    "rerank_depth": 10,
+    "served_retrieval_k": 20,
+    "note": "Eval fuses top-depth from each retriever (needed for Recall@100); the served API fuses top RETRIEVAL_K. hybrid+rerank reranks the hybrid top rerank_depth, as served; lower ranks keep hybrid order.",
+    "embedding_model": "sentence-transformers/all-MiniLM-L6-v2@1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2@233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "bootstrap": {
+      "n_resamples": 10000,
+      "seed": 42,
+      "paired": "same resampled query sets for all systems"
+    }
+  },
+  "hardware": {
+    "platform": "Windows-10-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "logical_cpus": 12,
+    "python": "3.11.9",
+    "packages": {
+      "torch": "2.13.0",
+      "sentence-transformers": "6.0.0",
+      "faiss-cpu": "1.15.0",
+      "rank-bm25": "0.2.2",
+      "numpy": "2.4.6"
+    },
+    "execution": "single process, sequential queries, CPU only",
+    "torch_threads": 10,
+    "cpu_name": "12th Gen Intel(R) Core(TM) i5-1235U",
+    "ram_gb": 15.7
+  },
+  "timing_seconds": {
+    "load": 19.9,
+    "queries": 967.0
+  },
+  "systems": {
+    "bm25": {
+      "mrr@10": {
+        "mean": 0.45474603174603173,
+        "ci95": [
+          0.42795254960317464,
+          0.4820925496031746
+        ]
+      },
+      "recall@10": {
+        "mean": 0.6553333333333332,
+        "ci95": [
+          0.6263333333333333,
+          0.684
+        ]
+      },
+      "recall@100": {
+        "mean": 0.8715,
+        "ci95": [
+          0.851,
+          0.891
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.49924402366320714,
+        "ci95": [
+          0.4732441887965651,
+          0.5256730292606121
+        ]
+      },
+      "latency_ms": {
+        "p50": 449.2705000011483,
+        "p95": 872.6677699993161
+      }
+    },
+    "dense": {
+      "mrr@10": {
+        "mean": 0.6971734126984127,
+        "ci95": [
+          0.6741030555555555,
+          0.7202079563492062
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9159166666666667,
+        "ci95": [
+          0.8990833333333332,
+          0.9321666666666667
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9903333333333333,
+        "ci95": [
+          0.984,
+          0.9956666666666667
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.7456397511132282,
+        "ci95": [
+          0.7256959898305188,
+          0.7654495730460925
+        ]
+      },
+      "latency_ms": {
+        "p50": 91.96104999864474,
+        "p95": 124.37529500002711
+      }
+    },
+    "hybrid": {
+      "mrr@10": {
+        "mean": 0.5960408730158729,
+        "ci95": [
+          0.5703431051587302,
+          0.6218545238095239
+        ]
+      },
+      "recall@10": {
+        "mean": 0.7981666666666667,
+        "ci95": [
+          0.7733333333333333,
+          0.822
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9928333333333332,
+        "ci95": [
+          0.9875,
+          0.9971666666666668
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.6382832089824181,
+        "ci95": [
+          0.6143748470336492,
+          0.6624559486764336
+        ]
+      },
+      "latency_ms": {
+        "p50": 543.9780499982589,
+        "p95": 982.3970999994344
+      }
+    },
+    "hybrid+rerank": {
+      "mrr@10": {
+        "mean": 0.7053916666666666,
+        "ci95": [
+          0.6796689285714286,
+          0.7306673809523808
+        ]
+      },
+      "recall@10": {
+        "mean": 0.7981666666666667,
+        "ci95": [
+          0.7733333333333333,
+          0.822
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9928333333333332,
+        "ci95": [
+          0.9875,
+          0.9971666666666668
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.720633646283668,
+        "ci95": [
+          0.6962017396408454,
+          0.744503497280928
+        ]
+      },
+      "latency_ms": {
+        "p50": 941.029300000082,
+        "p95": 1435.0876100004825
+      }
+    }
+  },
+  "stage_latency_ms": {
+    "bm25_ms": {
+      "p50": 449.2705000011483,
+      "p95": 872.6677699993161
+    },
+    "dense_ms": {
+      "p50": 91.96104999864474,
+      "p95": 124.37529500002711
+    },
+    "fusion_ms": {
+      "p50": 0.4644499986170558,
+      "p95": 0.7185700014815664
+    },
+    "rerank_ms": {
+      "p50": 382.329000000027,
+      "p95": 530.6312200009415
+    }
+  },
+  "comparisons": {
+    "hybrid vs bm25": {
+      "mrr@10": {
+        "mean_diff": 0.1412948412698413,
+        "ci_low": 0.12493469246031746,
+        "ci_high": 0.157842251984127,
+        "p_diff_le_0": 0.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "recall@10": {
+        "mean_diff": 0.1428333333333333,
+        "ci_low": 0.12166666666666667,
+        "ci_high": 0.16416666666666666,
+        "p_diff_le_0": 0.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "recall@100": {
+        "mean_diff": 0.12133333333333335,
+        "ci_low": 0.102,
+        "ci_high": 0.14183333333333334,
+        "p_diff_le_0": 0.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "ndcg@10": {
+        "mean_diff": 0.13903918531921083,
+        "ci_low": 0.12480335451332716,
+        "ci_high": 0.15351919176307793,
+        "p_diff_le_0": 0.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      }
+    },
+    "hybrid vs dense": {
+      "mrr@10": {
+        "mean_diff": -0.10113253968253967,
+        "ci_low": -0.12344061507936506,
+        "ci_high": -0.07838441468253968,
+        "p_diff_le_0": 1.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "recall@10": {
+        "mean_diff": -0.11775,
+        "ci_low": -0.14183333333333334,
+        "ci_high": -0.0942479166666667,
+        "p_diff_le_0": 1.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "recall@100": {
+        "mean_diff": 0.0025,
+        "ci_low": -0.0008333333333333334,
+        "ci_high": 0.0065,
+        "p_diff_le_0": 0.085,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "ndcg@10": {
+        "mean_diff": -0.10735654213081029,
+        "ci_low": -0.12734370652881097,
+        "ci_high": -0.08711333027314795,
+        "p_diff_le_0": 1.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      }
+    },
+    "hybrid+rerank vs hybrid": {
+      "mrr@10": {
+        "mean_diff": 0.10935079365079364,
+        "ci_low": 0.0913704761904762,
+        "ci_high": 0.12737911706349206,
+        "p_diff_le_0": 0.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "recall@10": {
+        "mean_diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_diff_le_0": 1.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "recall@100": {
+        "mean_diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_diff_le_0": 1.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      },
+      "ndcg@10": {
+        "mean_diff": 0.08235043730124994,
+        "ci_low": 0.06905489862481011,
+        "ci_high": 0.09538739758126043,
+        "p_diff_le_0": 0.0,
+        "n_queries": 1000,
+        "n_resamples": 10000
+      }
+    }
+  }
+}
