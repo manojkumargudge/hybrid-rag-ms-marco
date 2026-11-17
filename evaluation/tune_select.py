@@ -16,6 +16,12 @@ wrrf+rerank only if it beats the best dense+rerank on tune with the paired
 95% bootstrap CI of the MRR@10 difference entirely above 0; otherwise serve
 the best dense+rerank, and hybrid stays a config option.
 
+Latency rule (added 2026-11-17, before the eval split was run with these
+systems): within the chosen family (same w for wrrf), serve the SMALLEST
+rerank depth whose tune MRR@10 is within LATENCY_TOLERANCE of the chosen
+config's. Rationale: depth 50 costs ~1.6 s CPU rerank per query (50 pairs x
+~33 ms) for +0.008 tune MRR@10 over depth 20.
+
 Never reads qrels_eval.tsv. Writes eval/results/<run>/metrics.json and
 per_query.jsonl.
 """
@@ -53,6 +59,24 @@ DECISION_RULE = (
     "paired 95% bootstrap CI of the MRR@10 difference entirely above 0; else serve "
     "best dense+rerank (hybrid remains a config option)."
 )
+LATENCY_TOLERANCE = 0.01
+LATENCY_RULE = (
+    "Within the chosen family (same w for wrrf), serve the smallest rerank depth whose "
+    f"tune MRR@10 mean is >= chosen MRR@10 - {LATENCY_TOLERANCE}. Rationale: depth 50 "
+    "costs ~1.6 s CPU rerank/query (50 pairs x ~33 ms) for +0.008 tune MRR@10 vs depth 20."
+)
+
+
+def apply_latency_rule(grid: dict, chosen: str, tolerance: float = LATENCY_TOLERANCE) -> str:
+    target = grid[chosen]
+    floor = target["mrr@10"]["mean"] - tolerance
+    candidates = [
+        name for name, g in grid.items()
+        if g["family"] == target["family"]
+        and g["dense_weight"] == target["dense_weight"]
+        and g["mrr@10"]["mean"] >= floor
+    ]
+    return min(candidates, key=lambda name: grid[name]["rerank_depth"])
 
 
 def load_tune(artifacts: Path) -> tuple[list[tuple[int, str]], dict[int, set[int]]]:
@@ -196,8 +220,9 @@ def main() -> None:
     if not args.reuse_cache:
         build_cache(artifacts, queries, args.cache)
     cache_seconds = time.perf_counter() - started
-    grid, best_dense, best_wrrf, comparison, chosen, per_query = select(
+    grid, best_dense, best_wrrf, comparison, chosen_by_mrr, per_query = select(
         args.cache, relevant, args.n_resamples, args.seed)
+    chosen = apply_latency_rule(grid, chosen_by_mrr)
 
     metrics = {
         "run": run,
@@ -216,6 +241,8 @@ def main() -> None:
             "cache_sha256": sha256_file(args.cache),
         },
         "decision_rule": DECISION_RULE,
+        "latency_rule": LATENCY_RULE,
+        "chosen_by_mrr": chosen_by_mrr,
         "best": {"dense+rerank": best_dense, "wrrf+rerank": best_wrrf},
         "best_wrrf_minus_best_dense": comparison,
         "chosen": {"name": chosen, **{k: grid[chosen][k] for k in

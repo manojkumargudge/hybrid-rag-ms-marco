@@ -76,3 +76,21 @@ def test_paired_bootstrap_identical_systems():
 def test_paired_bootstrap_rejects_mismatched_lengths():
     with pytest.raises(ValueError):
         paired_bootstrap([1.0], [1.0, 0.0])
+
+
+def test_latency_rule_picks_smallest_depth_within_tolerance():
+    from evaluation.tune_select import apply_latency_rule
+
+    def cfg(family, w, depth, mrr):
+        return {"family": family, "dense_weight": w, "rerank_depth": depth,
+                "mrr@10": {"mean": mrr}}
+
+    grid = {
+        "d10": cfg("dense+rerank", None, 10, 0.7865),
+        "d20": cfg("dense+rerank", None, 20, 0.7925),
+        "d50": cfg("dense+rerank", None, 50, 0.8003),
+        "w20": cfg("wrrf+rerank", 0.6, 20, 0.7999),  # other family: ignored
+    }
+    assert apply_latency_rule(grid, "d50", 0.01) == "d20"
+    assert apply_latency_rule(grid, "d50", 0.02) == "d10"
+    assert apply_latency_rule(grid, "d50", 0.0) == "d50"
