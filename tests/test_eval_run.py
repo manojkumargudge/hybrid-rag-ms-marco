@@ -108,3 +108,17 @@ def test_evaluate_and_summarize_wire_all_systems():
     assert "dense+rerank(depth=20) vs dense" in summary["comparisons"]
     stage = records[0]["stage_ms"]
     assert stage["dense_rerank_cumulative_ms@20"] <= stage["dense_rerank_cumulative_ms@50"]
+
+
+def test_served_default_matches_tune_selection():
+    """Serving default must be the config selected on tune."""
+    import json
+    from pathlib import Path
+
+    from app.config import Settings
+    from evaluation.run_eval import SERVED_SOURCE
+
+    chosen = json.loads(Path(SERVED_SOURCE).read_text(encoding="utf-8"))["chosen"]
+    fields = Settings.model_fields
+    assert chosen["family"] == "dense+rerank" and fields["retrieval_mode"].default == "dense"
+    assert chosen["rerank_depth"] == fields["rerank_depth"].default == 20

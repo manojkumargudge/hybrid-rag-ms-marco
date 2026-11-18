@@ -57,8 +57,9 @@ from evaluation.metrics import (
 
 BASE_SYSTEMS = ("bm25", "dense", "hybrid", "hybrid+rerank")
 BASE_COMPARISONS = (("hybrid", "bm25"), ("hybrid", "dense"), ("hybrid+rerank", "hybrid"))
-# Chosen on tune by evaluation/tune_select.py (MRR rule + latency rule).
-SERVED_RERANK_DEPTH = 20
+# Chosen on tune by evaluation/tune_select.py (MRR rule + latency rule) and
+# served as the default (RETRIEVAL_MODE=dense, RERANK_DEPTH=20).
+SERVED_RERANK_DEPTH = settings.rerank_depth
 SERVED_SOURCE = "eval/results/20261117-v3-tune-c858705/metrics.json"
 WARMUP_QUERIES = ("what is a warmup query", "how long does it take to boil an egg")
 
@@ -329,6 +330,8 @@ def main() -> None:
                              "writes nothing.")
     args = parser.parse_args()
 
+    if settings.retrieval_mode != "dense":
+        raise ValueError("The served-system definition assumes RETRIEVAL_MODE=dense.")
     dense_depths = parse_depths(args.dense_rerank_depths, SERVED_RERANK_DEPTH, args.depth)
     system_names, comparison_pairs = systems_and_comparisons(dense_depths, SERVED_RERANK_DEPTH)
 

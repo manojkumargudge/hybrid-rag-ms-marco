@@ -1,4 +1,7 @@
 ﻿
+from typing import Literal
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,10 +27,17 @@ class Settings(BaseSettings):
     index_version: str = "v3"
     data_version: str = "v3"
 
-    retrieval_k: int = 20
-    hybrid_top_k: int = 10
-    rerank_top_k: int = 5
-    rrf_k: int = 60
+    # Served default chosen on the tune split only
+    # (eval/results/20261117-v3-tune-c858705): dense retrieval, cross-encoder
+    # rerank of the top 20 candidates.
+    retrieval_mode: Literal["dense", "hybrid"] = "dense"
+    rerank_depth: int = Field(default=20, gt=0)
+    rerank_top_k: int = Field(default=5, gt=0)
+    # Hybrid mode only: candidates fetched from each retriever before RRF,
+    # RRF constant, and dense weight (0.5 = standard RRF).
+    retrieval_k: int = Field(default=20, gt=0)
+    rrf_k: int = Field(default=60, gt=0)
+    hybrid_dense_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     groq_timeout_seconds: float = 30.0
     groq_max_retries: int = 2
     cors_origins: str = ""

@@ -1,11 +1,15 @@
 from logging import getLogger
 from time import perf_counter
+from typing import Protocol
 
 from app.generation.groq_generator import GroqGenerator
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
-from app.retrieval.hybrid_retriever import HybridRetriever
 
 logger = getLogger(__name__)
+
+
+class Retriever(Protocol):
+    def retrieve(self, query: str, top_k: int) -> list[dict]: ...
 
 
 class RAGService:
@@ -13,39 +17,32 @@ class RAGService:
     End-to-end Retrieval-Augmented Generation service.
 
     Pipeline:
-        Dense + BM25
+        Retriever (dense, or hybrid dense + BM25 with RRF) -> top rerank_depth
             ↓
-        RRF Fusion
-            ↓
-        Cross-Encoder Reranking
+        Cross-Encoder Reranking -> top rerank_top_k (or the request's top_k)
             ↓
         Groq LLM Generation
     """
 
     def __init__(
         self,
-        hybrid_retriever: HybridRetriever,
+        retriever: Retriever,
         reranker: CrossEncoderReranker,
         generator: GroqGenerator,
-        retrieval_k: int = 20,
-        hybrid_top_k: int = 10,
+        rerank_depth: int = 20,
         rerank_top_k: int = 5,
     ) -> None:
-        if retrieval_k <= 0:
-            raise ValueError("retrieval_k must be greater than zero.")
-
-        if hybrid_top_k <= 0:
-            raise ValueError("hybrid_top_k must be greater than zero.")
+        if rerank_depth <= 0:
+            raise ValueError("rerank_depth must be greater than zero.")
 
         if rerank_top_k <= 0:
             raise ValueError("rerank_top_k must be greater than zero.")
 
-        self.hybrid_retriever = hybrid_retriever
+        self.retriever = retriever
         self.reranker = reranker
         self.generator = generator
 
-        self.retrieval_k = retrieval_k
-        self.hybrid_top_k = hybrid_top_k
+        self.rerank_depth = rerank_depth
         self.rerank_top_k = rerank_top_k
 
     def answer(self, query: str, top_k: int | None = None) -> dict:
@@ -67,21 +64,20 @@ class RAGService:
         started_at = perf_counter()
 
         retrieval_started_at = perf_counter()
-        hybrid_results = self.hybrid_retriever.retrieve(
+        candidates = self.retriever.retrieve(
             query=query,
-            top_k=self.hybrid_top_k,
-            retrieval_k=self.retrieval_k,
+            top_k=self.rerank_depth,
         )
         logger.info(
             "retrieval_complete",
             extra={
                 "stage": "retrieval",
                 "stage_ms": _elapsed_ms(retrieval_started_at),
-                "result_count": len(hybrid_results),
+                "result_count": len(candidates),
             },
         )
 
-        if not hybrid_results:
+        if not candidates:
             return {
                 "answer": (
                     "I could not find relevant information "
@@ -94,7 +90,7 @@ class RAGService:
         rerank_started_at = perf_counter()
         reranked_results = self.reranker.rerank(
             query=query,
-            passages=hybrid_results,
+            passages=candidates,
             top_k=final_top_k,
         )
         logger.info(

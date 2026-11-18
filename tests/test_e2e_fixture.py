@@ -1,9 +1,9 @@
 """End-to-end: HTTP request -> real create_rag_service wiring -> answer.
 
-Real: manifest verification, BM25 (rank_bm25 pickle), FAISS, RRF fusion,
-reranker sorting, prompt building, API schema. Stubbed (no network/models):
-the sentence-transformer (HashEncoder), the cross-encoder scorer, and the
-Groq client.
+Runs in both retrieval modes. Real: manifest verification, FAISS, BM25
+(rank_bm25 pickle, hybrid mode), RRF fusion, reranker sorting, prompt
+building, API schema. Stubbed (no network/models): the sentence-transformer
+(HashEncoder), the cross-encoder scorer, and the Groq client.
 """
 
 from types import SimpleNamespace
@@ -13,11 +13,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.config import settings
+from app.config import Settings, settings
 from app.main import app
 from scripts.build_indices import build_bm25, build_dense
 from scripts.prepare_data import prepare
 from tests.msmarco_fixture import TOPICS, HashEncoder, write_raw_fixture
+
+MODES = ["dense", "hybrid"]
 
 
 class OverlapCrossEncoder:
@@ -34,14 +36,21 @@ class OverlapCrossEncoder:
 
 
 @pytest.fixture
-def fixture_service(tmp_path, monkeypatch):
+def built(tmp_path):
     raw, out = tmp_path / "raw", tmp_path / "v3"
     write_raw_fixture(raw)
     prepare(raw, out, seed=42, n_eval=4, n_tune=2, hard_per_query=3,
             target_size=40, created_at="2026-01-01T00:00:00+00:00")
     build_bm25(out)
     build_dense(out, HashEncoder(), "hash-encoder", None, batch_size=8)
+    return out
 
+
+@pytest.fixture
+def service(built, monkeypatch, request):
+    """Fixture artifacts wired into the app; mode from parametrize (default dense)."""
+    mode = getattr(request, "param", "dense")
+    out = built
     groq_client = Mock()
     groq_client.chat.completions.create.return_value = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content="Grounded answer."))]
@@ -64,17 +73,23 @@ def fixture_service(tmp_path, monkeypatch):
         "groq_api_key": "test-key",
     }.items():
         monkeypatch.setattr(settings, name, str(value))
+    monkeypatch.setattr(settings, "retrieval_mode", mode)
     monkeypatch.setattr(app.state, "rag_service", None)
 
-    yield out, groq_client
+    yield out, groq_client, mode
     app.state.rag_service = None
 
 
-def test_query_end_to_end_on_fixture(client, fixture_service):
-    out, groq_client = fixture_service
+def _first_eval_query(out):
     qrels = pd.read_csv(out / "qrels_eval.tsv", sep="\t", header=None)
     qid, relevant_pid = int(qrels.iloc[0, 0]), int(qrels.iloc[0, 2])
-    query = TOPICS[qid - 1000]
+    return TOPICS[qid - 1000], relevant_pid
+
+
+@pytest.mark.parametrize("service", MODES, indirect=True)
+def test_query_end_to_end_on_fixture(client, service):
+    out, groq_client, mode = service
+    query, relevant_pid = _first_eval_query(out)
 
     response = client.post("/api/v1/query", json={"query": query, "top_k": 3})
 
@@ -90,32 +105,84 @@ def test_query_end_to_end_on_fixture(client, fixture_service):
     prompt = groq_client.chat.completions.create.call_args.kwargs["messages"][1]
     assert body["citations"][0]["passage_text"] in prompt["content"]
 
+    meta = client.get("/metadata").json()
+    assert meta["retrieval_mode"] == mode
+    assert meta["rerank_depth"] == settings.rerank_depth
 
-def test_default_serving_paths_are_v3():
-    """Served corpus must be the evaluated one (artifacts/v3)."""
-    from app.config import Settings
 
+def test_defaults_are_dense_depth_20_on_v3():
+    """Served default = config chosen on tune; corpus = the evaluated v3."""
     fields = Settings.model_fields
-    for name in (
-        "manifest_path",
-        "passages_path",
-        "dense_index_path",
-        "bm25_index_path",
-        "bm25_corpus_path",
-    ):
+    assert fields["retrieval_mode"].default == "dense"
+    assert fields["rerank_depth"].default == 20
+    assert "hybrid_top_k" not in fields
+    for name in ("manifest_path", "passages_path", "dense_index_path",
+                 "bm25_index_path", "bm25_corpus_path"):
         assert fields[name].default.startswith("artifacts/v3/"), name
     assert fields["index_version"].default == fields["data_version"].default == "v3"
 
 
-def test_ready_is_200_with_fixture_artifacts(client, fixture_service):
+@pytest.mark.parametrize("service", MODES, indirect=True)
+def test_ready_is_200_with_fixture_artifacts(client, service):
     assert client.get("/ready").status_code == 200
 
 
-def test_tampered_artifact_makes_query_503(client, fixture_service):
-    out, _ = fixture_service
-    (out / "bm25/bm25_index.pkl").write_bytes(b"tampered")
+@pytest.mark.parametrize("service", MODES, indirect=True)
+def test_tampered_dense_index_makes_query_503(client, service):
+    out, _, _ = service
+    (out / "dense_index.faiss").write_bytes(b"tampered")
 
     response = client.post("/api/v1/query", json={"query": TOPICS[0]})
 
     assert response.status_code == 503
     assert response.json()["detail"] == "RAG service is not ready."
+
+
+@pytest.mark.parametrize(("service", "expected"), [("hybrid", 503), ("dense", 200)],
+                         indirect=["service"])
+def test_tampered_bm25_only_matters_in_hybrid_mode(client, service, expected):
+    out, _, _ = service
+    (out / "bm25/bm25_index.pkl").write_bytes(b"tampered")
+
+    response = client.post("/api/v1/query", json={"query": TOPICS[0]})
+
+    assert response.status_code == expected, response.text
+
+
+def test_dense_mode_works_without_bm25_files(client, service):
+    out, _, mode = service
+    assert mode == "dense"
+    (out / "bm25/bm25_index.pkl").unlink()
+    (out / "bm25/tokenized_corpus.pkl").unlink()
+
+    assert client.get("/ready").status_code == 200
+    response = client.post("/api/v1/query", json={"query": TOPICS[0]})
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("service", ["hybrid"], indirect=True)
+def test_hybrid_ready_requires_bm25_files(client, service):
+    out, _, _ = service
+    (out / "bm25/bm25_index.pkl").unlink()
+    assert client.get("/ready").status_code == 503
+
+
+def test_hybrid_dense_weight_default_and_wiring(service, monkeypatch):
+    """HYBRID_DENSE_WEIGHT defaults to 0.5 (standard RRF) and reaches the
+    HybridRetriever that create_rag_service builds; out-of-range is rejected."""
+    from pydantic import ValidationError
+
+    from app.main import create_rag_service
+    from app.retrieval.hybrid_retriever import HybridRetriever
+
+    assert Settings.model_fields["hybrid_dense_weight"].default == 0.5
+    with pytest.raises(ValidationError):
+        Settings(hybrid_dense_weight=1.5)
+
+    monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
+    monkeypatch.setattr(settings, "hybrid_dense_weight", 0.8)
+    retriever = create_rag_service().retriever
+    assert isinstance(retriever, HybridRetriever)
+    assert retriever.dense_scale == pytest.approx(1.6)
+    assert retriever.bm25_scale == pytest.approx(0.4)
+    assert retriever.retrieval_k == settings.retrieval_k

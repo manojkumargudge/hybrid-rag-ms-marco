@@ -13,6 +13,7 @@ class HybridRetriever:
         bm25_retriever: Any,
         rrf_k: int = 60,
         dense_weight: float = 0.5,
+        retrieval_k: int = 10,
     ) -> None:
         if rrf_k <= 0:
             raise ValueError("rrf_k must be greater than zero.")
@@ -20,9 +21,13 @@ class HybridRetriever:
         if not 0.0 <= dense_weight <= 1.0:
             raise ValueError("dense_weight must be between 0 and 1.")
 
+        if retrieval_k <= 0:
+            raise ValueError("retrieval_k must be greater than zero.")
+
         self.dense_retriever = dense_retriever
         self.bm25_retriever = bm25_retriever
         self.rrf_k = rrf_k
+        self.retrieval_k = retrieval_k
         # Weighted RRF: 2*w / (k + rank_dense) + 2*(1 - w) / (k + rank_bm25).
         # w = 0.5 is exactly standard (unweighted) RRF.
         self.dense_scale = 2.0 * dense_weight
@@ -32,7 +37,7 @@ class HybridRetriever:
         self,
         query: str,
         top_k: int = 10,
-        retrieval_k: int = 10,
+        retrieval_k: int | None = None,
     ) -> list[dict]:
         """
         Retrieve documents using Dense + BM25 and fuse their rankings
@@ -42,7 +47,8 @@ class HybridRetriever:
             query: User search query.
             top_k: Number of final hybrid results to return.
             retrieval_k: Number of candidates retrieved from each
-                individual retriever before fusion.
+                individual retriever before fusion (default: the
+                constructor's retrieval_k).
 
         Returns:
             Ranked list of hybrid retrieval results.
@@ -53,6 +59,9 @@ class HybridRetriever:
 
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero.")
+
+        if retrieval_k is None:
+            retrieval_k = self.retrieval_k
 
         if retrieval_k <= 0:
             raise ValueError("retrieval_k must be greater than zero.")
