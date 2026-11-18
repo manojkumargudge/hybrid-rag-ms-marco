@@ -14,6 +14,9 @@ from app.main import create_rag_service
 
 
 def main() -> None:
+    # LLM answers and MS MARCO passages contain characters a Windows console
+    # code page (cp1252) cannot encode.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     query = sys.argv[1] if len(sys.argv) > 1 else "what are the symptoms of diabetes?"
     print(f"retrieval_mode={settings.retrieval_mode} rerank_depth={settings.rerank_depth} "
           f"rerank_top_k={settings.rerank_top_k}")
