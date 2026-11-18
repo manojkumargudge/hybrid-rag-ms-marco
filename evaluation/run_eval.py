@@ -4,12 +4,22 @@ Systems (all on the same eval queries):
     bm25            BM25Retriever, top --depth
     dense           DenseRetriever (pinned model revision), top --depth
     hybrid          RRF (app HybridRetriever code) over the two lists above
-    hybrid+rerank   cross-encoder reranks hybrid top --rerank-depth (served
-                    default: HYBRID_TOP_K); ranks below that keep hybrid order
+    hybrid+rerank   cross-encoder reranks hybrid top --rerank-depth (default
+                    10); ranks below that keep hybrid order
+    dense+rerank(depth=d)
+                    cross-encoder reranks dense top d for each d in
+                    --dense-rerank-depths; ranks below d keep dense order.
+                    Scored incrementally (ranks 1..d1, then d1+1..d2, ...) and
+                    reused, so latency(d) = dense_ms + cumulative rerank_ms.
+
+The served system is dense+rerank(depth=SERVED_RERANK_DEPTH), selected on the
+tune split only (eval/results/20261117-v3-tune-c858705); deeper depths are
+reported for reference and are not selectable.
 
 Metrics: MRR@10, Recall@10, Recall@100, nDCG@10 (binary qrels), mean with
 95% bootstrap CI; paired bootstrap for hybrid vs bm25, hybrid vs dense,
-hybrid+rerank vs hybrid. Per-stage latency p50/p95 (single process,
+hybrid+rerank vs hybrid, served vs dense, served vs hybrid+rerank, and each
+deeper dense+rerank vs served. Per-stage latency p50/p95 (single process,
 sequential, CPU). Never reads the tune split. No LLM calls.
 
 Writes eval/results/<run>/metrics.json and per_query.jsonl.
@@ -45,8 +55,11 @@ from evaluation.metrics import (
     resample_indices,
 )
 
-SYSTEMS = ("bm25", "dense", "hybrid", "hybrid+rerank")
-COMPARISONS = (("hybrid", "bm25"), ("hybrid", "dense"), ("hybrid+rerank", "hybrid"))
+BASE_SYSTEMS = ("bm25", "dense", "hybrid", "hybrid+rerank")
+BASE_COMPARISONS = (("hybrid", "bm25"), ("hybrid", "dense"), ("hybrid+rerank", "hybrid"))
+# Chosen on tune by evaluation/tune_select.py (MRR rule + latency rule).
+SERVED_RERANK_DEPTH = 20
+SERVED_SOURCE = "eval/results/20261117-v3-tune-c858705/metrics.json"
 WARMUP_QUERIES = ("what is a warmup query", "how long does it take to boil an egg")
 
 
@@ -146,7 +159,63 @@ def _ms(started: float) -> float:
     return (time.perf_counter() - started) * 1000
 
 
-def evaluate_query(qid, query, relevant, bm25, dense, reranker, depth, rerank_depth, rrf_k):
+def parse_depths(spec: str, served_depth: int, max_depth: int) -> list[int]:
+    depths = sorted({int(part) for part in spec.split(",") if part.strip()})
+    if not depths or depths[0] <= 0:
+        raise ValueError("Dense rerank depths must be positive integers.")
+    if served_depth not in depths:
+        raise ValueError(f"--dense-rerank-depths must include the served depth {served_depth}.")
+    if depths[-1] > max_depth:
+        raise ValueError(f"Dense rerank depth {depths[-1]} exceeds --depth {max_depth}.")
+    return depths
+
+
+def dense_rerank_name(depth: int) -> str:
+    return f"dense+rerank(depth={depth})"
+
+
+def systems_and_comparisons(
+    dense_depths: list[int], served_depth: int
+) -> tuple[list[str], list[tuple[str, str]]]:
+    served = dense_rerank_name(served_depth)
+    systems = [*BASE_SYSTEMS, *(dense_rerank_name(d) for d in dense_depths)]
+    comparisons = [
+        *BASE_COMPARISONS,
+        (served, "dense"),
+        (served, "hybrid+rerank"),
+        *((dense_rerank_name(d), served) for d in dense_depths if d > served_depth),
+    ]
+    return systems, comparisons
+
+
+def incremental_rerank(reranker, query: str, candidates: list[dict], depths: list[int]):
+    """Rerank candidates[:d] for each d in ascending `depths`, scoring each
+    passage once: segment (prev_d, d] is scored only when depth d is reached.
+
+    Returns {d: (ranking_ids, cumulative_rerank_ms)}; ranks below d keep the
+    candidates' order. Ties keep candidate order (stable sort), as in a single
+    rerank call over candidates[:d].
+    """
+    scores: dict[int, float] = {}
+    out = {}
+    elapsed_ms = 0.0
+    previous = 0
+    base = [c["passage_id"] for c in candidates]
+    for depth in depths:
+        segment = candidates[previous:depth]
+        if segment:
+            started = time.perf_counter()
+            scored = reranker.rerank(query, segment, top_k=len(segment))
+            elapsed_ms += _ms(started)
+            scores.update({r["passage_id"]: r["score"] for r in scored})
+        head = sorted(base[:depth], key=lambda pid: scores[pid], reverse=True)
+        out[depth] = (head + base[depth:], elapsed_ms)
+        previous = depth
+    return out
+
+
+def evaluate_query(qid, query, relevant, bm25, dense, reranker, depth, rerank_depth, rrf_k,
+                   dense_depths=()):
     timings = {}
     started = time.perf_counter()
     try:
@@ -184,6 +253,14 @@ def evaluate_query(qid, query, relevant, bm25, dense, reranker, depth, rerank_de
     }
     latency["hybrid+rerank"] = latency["hybrid"] + timings["rerank_ms"]
 
+    for d, (ranking, rerank_ms) in incremental_rerank(
+        reranker, query, dense_results, list(dense_depths)
+    ).items():
+        name = dense_rerank_name(d)
+        rankings[name] = ranking
+        timings[f"dense_rerank_cumulative_ms@{d}"] = rerank_ms
+        latency[name] = timings["dense_ms"] + rerank_ms
+
     record = {"qid": int(qid), "query": query, "relevant": sorted(relevant),
               "bm25_empty_query": not bm25_results, "stage_ms": timings, "systems": {}}
     for system, ranking in rankings.items():
@@ -197,10 +274,11 @@ def evaluate_query(qid, query, relevant, bm25, dense, reranker, depth, rerank_de
     return record
 
 
-def summarize(records: list[dict], n_resamples: int, seed: int) -> dict:
+def summarize(records: list[dict], n_resamples: int, seed: int,
+              system_names=BASE_SYSTEMS, comparison_pairs=BASE_COMPARISONS) -> dict:
     indices = resample_indices(len(records), n_resamples, seed)
     systems = {}
-    for system in SYSTEMS:
+    for system in system_names:
         entry = {}
         for metric in METRICS:
             values = [r["systems"][system][metric] for r in records]
@@ -226,7 +304,7 @@ def summarize(records: list[dict], n_resamples: int, seed: int) -> dict:
             )
             for metric in METRICS
         }
-        for a, b in COMPARISONS
+        for a, b in comparison_pairs
     }
     return {"systems": systems, "stage_latency_ms": stages, "comparisons": comparisons}
 
@@ -239,13 +317,20 @@ def main() -> None:
     parser.add_argument("--out-root", type=Path, default=Path("eval/results"))
     parser.add_argument("--run-name", default=None)
     parser.add_argument("--depth", type=int, default=100)
-    parser.add_argument("--rerank-depth", type=int, default=settings.hybrid_top_k)
+    parser.add_argument("--rerank-depth", type=int, default=10,
+                        help="Hybrid+rerank depth (default 10).")
+    parser.add_argument("--dense-rerank-depths", default="20,50",
+                        help="Comma-separated dense+rerank depths; must include the "
+                             f"served depth ({SERVED_RERANK_DEPTH}).")
     parser.add_argument("--n-resamples", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--estimate", type=int, default=0,
                         help="Time the first N eval queries and print an estimate; "
                              "writes nothing.")
     args = parser.parse_args()
+
+    dense_depths = parse_depths(args.dense_rerank_depths, SERVED_RERANK_DEPTH, args.depth)
+    system_names, comparison_pairs = systems_and_comparisons(dense_depths, SERVED_RERANK_DEPTH)
 
     artifacts = args.artifacts_dir
     manifest_path = artifacts / "manifest.json"
@@ -280,14 +365,15 @@ def main() -> None:
 
     for warm in WARMUP_QUERIES:  # not reported
         evaluate_query(0, warm, {-1}, bm25, dense, reranker, args.depth,
-                       args.rerank_depth, settings.rrf_k)
+                       args.rerank_depth, settings.rrf_k, dense_depths)
 
     subset = queries[: args.estimate] if args.estimate else queries
     started = time.perf_counter()
     records = []
     for i, (qid, query) in enumerate(subset, 1):
         records.append(evaluate_query(qid, query, relevant[qid], bm25, dense, reranker,
-                                      args.depth, args.rerank_depth, settings.rrf_k))
+                                      args.depth, args.rerank_depth, settings.rrf_k,
+                                      dense_depths))
         if i % 100 == 0:
             print(f"{i}/{len(subset)} queries, {time.perf_counter() - started:.0f}s",
                   flush=True)
@@ -300,7 +386,7 @@ def main() -> None:
               f"for {len(queries)} queries (+ bootstrap)")
         return
 
-    summary = summarize(records, args.n_resamples, args.seed)
+    summary = summarize(records, args.n_resamples, args.seed, system_names, comparison_pairs)
     metrics = {
         "run": run_name,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -314,14 +400,25 @@ def main() -> None:
         "split": "eval (official MS MARCO dev-small qrels); tune split not used",
         "n_queries": len(records),
         "n_bm25_empty_queries": sum(r["bm25_empty_query"] for r in records),
+        "served": {
+            "system": dense_rerank_name(SERVED_RERANK_DEPTH),
+            "retrieval_mode": "dense",
+            "rerank_depth": SERVED_RERANK_DEPTH,
+            "selected_on": "tune split only",
+            "selection_source": SERVED_SOURCE,
+            "report_only_systems": [dense_rerank_name(d) for d in dense_depths
+                                    if d != SERVED_RERANK_DEPTH],
+        },
         "config": {
             "depth": args.depth,
             "rrf_k": settings.rrf_k,
-            "rerank_depth": args.rerank_depth,
-            "served_retrieval_k": settings.retrieval_k,
-            "note": "Eval fuses top-depth from each retriever (needed for Recall@100); "
-                    "the served API fuses top RETRIEVAL_K. hybrid+rerank reranks the "
-                    "hybrid top rerank_depth, as served; lower ranks keep hybrid order.",
+            "hybrid_rerank_depth": args.rerank_depth,
+            "dense_rerank_depths": dense_depths,
+            "note": "Each retriever returns top-depth (needed for Recall@100); hybrid "
+                    "fuses both lists. Reranked systems rerank the top N of their base "
+                    "ranking; lower ranks keep base order. dense+rerank depths are "
+                    "scored incrementally and share cross-encoder scores; latency(d) = "
+                    "dense_ms + cumulative rerank ms up to d.",
             "embedding_model": f"{settings.embedding_model}@{settings.embedding_model_revision}",
             "reranker_model": f"{settings.reranker_model}@{settings.reranker_model_revision}",
             "bootstrap": {"n_resamples": args.n_resamples, "seed": args.seed,
