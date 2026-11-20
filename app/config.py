@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
     groq_api_key: str = ""
+    # Comma-separated accepted X-API-Key values. Auth is on unless
+    # AUTH_DISABLED=true; with no keys configured every protected request
+    # gets 401.
+    api_keys: str = ""
+    auth_disabled: bool = False
     groq_model: str = "openai/gpt-oss-120b"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"

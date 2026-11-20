@@ -1,7 +1,8 @@
 from logging import getLogger
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.auth import require_api_key
 from app.schemas.query import QueryRequest, QueryResponse
 
 logger = getLogger(__name__)
@@ -9,6 +10,7 @@ logger = getLogger(__name__)
 router = APIRouter(
     prefix="/api/v1",
     tags=["RAG"],
+    dependencies=[Depends(require_api_key)],
 )
 
 
@@ -21,7 +23,7 @@ def query_rag(
     query_request: QueryRequest,
 ) -> QueryResponse:
     """
-    Execute the complete Hybrid RAG pipeline.
+    Run the RAG pipeline (retrieve -> rerank -> generate). Requires X-API-Key.
     """
 
     try:
