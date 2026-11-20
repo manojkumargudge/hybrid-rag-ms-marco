@@ -167,10 +167,7 @@ curl -X POST http://localhost:8000/api/v1/query \
   [`v3-artifacts`](https://github.com/manojkumargudge/hybrid-rag-ms-marco/releases/tag/v3-artifacts)
   into `artifacts/v3/`. Every file must match the SHA-256 in the committed
   [`manifests/v3.json`](manifests/v3.json); a mismatching file is deleted, the script exits
-  non-zero, and existing files are never overwritten. The data is derived from MS MARCO and is
-  for **non-commercial research use only**
-  ([MS MARCO terms](https://microsoft.github.io/msmarco/)). This repository's MIT license covers
-  the code, not the data.
+  non-zero, and existing files are never overwritten. See [Data](#data) for the terms.
 - **`change-me-demo-key`** is the demo key from `.env.example`. **`API_PORT`** in `.env` sets
   the host port (default 8000).
 - **The image** installs hash-locked CPU-only dependencies and bakes in the pinned model
@@ -217,6 +214,20 @@ python -m evaluation.run_eval        # eval split: writes eval/results/<date>-v3
 `run_eval --estimate 20` times 20 queries and writes nothing. The full eval spent 2,753 s
 (about 46 minutes) loading models and running queries on the hardware above
 (`timing_seconds` in its `metrics.json`).
+
+## Data
+
+The corpus is derived from [MS MARCO](https://microsoft.github.io/msmarco/). Under its terms the
+MS MARCO datasets are intended for **non-commercial research purposes only** and come without
+any license or other intellectual property rights. Use of the
+[`v3-artifacts`](https://github.com/manojkumargudge/hybrid-rag-ms-marco/releases/tag/v3-artifacts)
+release is subject to those terms. This repository's MIT license covers the code, not the data.
+If you use the data, cite Bajaj et al., *MS MARCO: A Human Generated MAchine Reading
+COmprehension Dataset*, 2016 (arXiv:1611.09268).
+
+**If Microsoft or a document owner asks, this release will be removed; build-from-source path
+remains** ([Build corpus v3 from source](#build-corpus-v3-from-source-instead)). Document owners
+can also contact ms-marco@microsoft.com.
 
 ## Configuration
 
