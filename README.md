@@ -148,19 +148,50 @@ Errors: 400 invalid query, 401 missing or invalid API key, 422 validation error,
 limited, 500 unexpected pipeline
 error, 502 LLM failure, 503 artifacts missing or failing verification.
 
-## Quick start
+## Quick start (Docker Compose)
 
-### 1. Build corpus v3 and its indices
+```bash
+git clone https://github.com/manojkumargudge/hybrid-rag-ms-marco.git
+cd hybrid-rag-ms-marco
+python scripts/fetch_artifacts.py    # ~370 MB from the v3-artifacts release, sha256-verified
+cp .env.example .env                 # set GROQ_API_KEY; replace the demo API_KEYS before exposing it
+docker compose up --build -d
+curl http://localhost:8000/ready
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" -H "X-API-Key: change-me-demo-key" \
+  -d '{"query": "what are the symptoms of diabetes?"}'
+```
 
-The artifacts are not in the repository. Building them downloads the official MS MARCO files
-(1,057,717,952 + 687,414,398 bytes, MD5-checked against the values recorded by ir_datasets) and
-needs several GB of free disk.
+- **`fetch_artifacts.py`** needs only the Python standard library. It downloads the prebuilt
+  corpus v3 from the GitHub release
+  [`v3-artifacts`](https://github.com/manojkumargudge/hybrid-rag-ms-marco/releases/tag/v3-artifacts)
+  into `artifacts/v3/`. Every file must match the SHA-256 in the committed
+  [`manifests/v3.json`](manifests/v3.json); a mismatching file is deleted, the script exits
+  non-zero, and existing files are never overwritten. See [Data](#data) for the terms.
+- **`change-me-demo-key`** is the demo key from `.env.example`. **`API_PORT`** in `.env` sets
+  the host port (default 8000).
+- **The image** installs hash-locked CPU-only dependencies and bakes in the pinned model
+  revisions; it runs with Hugging Face offline mode. `artifacts/v3` is mounted read-only, never
+  copied into the image. `/ready` returns 503 until `artifacts/v3` is present.
+
+### Run without Docker
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
+python scripts/fetch_artifacts.py
+cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
+### Build corpus v3 from source instead
+
+`fetch_artifacts.py` is optional. The same artifacts can be rebuilt from the official MS MARCO
+files (1,057,717,952 + 687,414,398 bytes, MD5-checked against the values recorded by
+ir_datasets; needs several GB of free disk):
+
+```bash
 python -m scripts.download_msmarco                       # -> artifacts/raw/
 python -m scripts.prepare_data                           # -> artifacts/v3/ (passages, query splits, qrels)
 python -m scripts.build_indices --only bm25              # BM25 index
@@ -168,36 +199,12 @@ python -m scripts.build_indices --only dense             # FAISS index (CPU: 3,2
 python -m scripts.verify_artifacts                       # sha256 + row-count checks
 ```
 
-Every step is deterministic: seed 42, pinned model revisions, and the sampling rules are
-recorded in `artifacts/v3/manifest.json`. A copy is committed as
-[`manifests/v3.json`](manifests/v3.json). The scripts refuse to overwrite existing artifacts.
+Seed 42, the sampling rules and the pinned model revisions are recorded in
+`artifacts/v3/manifest.json` (committed copy: [`manifests/v3.json`](manifests/v3.json)). The
+scripts refuse to overwrite existing artifacts. The FAISS index of a rebuild may not be
+byte-identical on different CPUs; `fetch_artifacts.py` gives the exact published files.
 
-### 2a. Run with Docker Compose
-
-```bash
-cp .env.example .env                 # set GROQ_API_KEY; replace the demo API_KEYS value before exposing it
-docker compose up --build -d
-curl http://localhost:8000/ready     # 200 once artifacts/v3 exists (step 1)
-curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" -H "X-API-Key: change-me-demo-key" \
-  -d '{"query": "what are the symptoms of diabetes?"}'
-```
-
-`change-me-demo-key` is the demo key from `.env.example`. `/ready` returns 503 until
-`artifacts/v3` has been built, because the artifacts are mounted, not shipped in the image.
-
-The image installs hash-locked CPU-only dependencies and bakes in the pinned model revisions
-(it runs with Hugging Face offline mode). `artifacts/v3` is mounted read-only, never copied into
-the image.
-
-### 2b. Run locally
-
-```bash
-cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-### 3. Reproduce the evaluation
+### Reproduce the evaluation
 
 ```bash
 python -m evaluation.tune_select     # tune split only: config selection
@@ -208,6 +215,20 @@ python -m evaluation.run_eval        # eval split: writes eval/results/<date>-v3
 (about 46 minutes) loading models and running queries on the hardware above
 (`timing_seconds` in its `metrics.json`).
 
+## Data
+
+The corpus is derived from [MS MARCO](https://microsoft.github.io/msmarco/). Under its terms the
+MS MARCO datasets are intended for **non-commercial research purposes only** and come without
+any license or other intellectual property rights. Use of the
+[`v3-artifacts`](https://github.com/manojkumargudge/hybrid-rag-ms-marco/releases/tag/v3-artifacts)
+release is subject to those terms. This repository's MIT license covers the code, not the data.
+If you use the data, cite Bajaj et al., *MS MARCO: A Human Generated MAchine Reading
+COmprehension Dataset*, 2016 (arXiv:1611.09268).
+
+**If Microsoft or a document owner asks, this release will be removed; build-from-source path
+remains** ([Build corpus v3 from source](#build-corpus-v3-from-source-instead)). Document owners
+can also contact ms-marco@microsoft.com.
+
 ## Configuration
 
 All settings are environment variables (see [`.env.example`](.env.example)).
@@ -217,6 +238,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `GROQ_API_KEY` | empty | Required for answers |
 | `API_KEYS` | empty | Comma-separated client keys accepted in `X-API-Key`; empty = every protected request gets 401 |
 | `AUTH_DISABLED` | `false` | `true` turns API-key auth off (local development only; logs a warning) |
+| `API_PORT` | `8000` | Docker Compose host port (the container always listens on 8000) |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | LLM for the final answer |
 | `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `30` / `2` | LLM timeout and retries on transient errors |
 | `EMBEDDING_MODEL` / `EMBEDDING_MODEL_REVISION` | `sentence-transformers/all-MiniLM-L6-v2` @ `1110a243…` | Dense encoder (pinned commit) |
@@ -238,7 +260,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 
 ```
 app/                 FastAPI app, retrievers, reranker, generator, artifact verification
-scripts/             download_msmarco, prepare_data, build_indices, verify_artifacts, lock_deps
+scripts/             fetch_artifacts, download_msmarco, prepare_data, build_indices, verify_artifacts, lock_deps, security_audit
 scripts/manual/      smoke tests that need real artifacts, models or network
 evaluation/          metrics, run_eval (eval split), tune_select (tune split)
 eval/results/        committed metrics.json + per_query.jsonl for each run
