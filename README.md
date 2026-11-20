@@ -193,7 +193,7 @@ source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 python scripts/fetch_artifacts.py
 cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
 ### Build corpus v3 from source instead
@@ -251,7 +251,8 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `AUTH_DISABLED` | `false` | `true` turns API-key auth off (local development only; logs a warning) |
 | `API_PORT` | `8000` | Docker Compose host port (the container always listens on 8000) |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | LLM for the final answer |
-| `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `30` / `2` | Per-attempt LLM timeout; retries on transient errors (backoff 0.2 s, 0.4 s, …) |
+| `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `10` / `2` | Per-attempt LLM timeout; retries on timeouts, 429 and 5xx only (backoff 0.2 s, 0.4 s, …) |
+| `GENERATION_DEADLINE_SECONDS` | `20` | Total budget for all LLM attempts and backoff; then the passages are returned with `answer: null` |
 | `EMBEDDING_MODEL` / `EMBEDDING_MODEL_REVISION` | `sentence-transformers/all-MiniLM-L6-v2` @ `1110a243…` | Dense encoder (pinned commit) |
 | `RERANKER_MODEL` / `RERANKER_MODEL_REVISION` | `cross-encoder/ms-marco-MiniLM-L-6-v2` @ `233902d2…` | Cross-encoder (pinned commit) |
 | `RETRIEVAL_MODE` | `dense` | `dense` or `hybrid` |
@@ -324,17 +325,35 @@ Example:
 
 **Rate limit.** Sliding 60-second window, `RATE_LIMIT_PER_MIN` requests per API key.
 Unauthenticated requests are limited per client IP, which also slows down key guessing. Over
-the limit gets 429 with `Retry-After: 60`.
+the limit gets 429 with `Retry-After: 60`. The removed settings `RATE_LIMIT_REQUESTS` and
+`RATE_LIMIT_WINDOW_SECONDS` are ignored; if either is set (environment or `.env`), startup
+logs a warning naming `RATE_LIMIT_PER_MIN`.
 
-**LLM timeouts and fallback.** Each Groq call has a `GROQ_TIMEOUT_SECONDS` timeout (default 30).
-Transient failures (timeouts, connection errors, 408/409/429/5xx) are retried `GROQ_MAX_RETRIES`
-times (default 2) with exponential backoff (0.2 s, 0.4 s). Other errors are not retried. Worst
-case with the defaults is about 3 × 30 s. If generation still fails, the API returns the
-reranked passages with `answer: null`, `error: "generation_failed"` and increments
-`rag_errors_total{type="generation_failed"}`.
+**Client IP and `X-Forwarded-For`.** The per-IP bucket uses `request.client.host`, the TCP
+peer, and never reads `X-Forwarded-For`. uvicorn's default proxy-header handling would
+otherwise replace `request.client.host` with a client-supplied `X-Forwarded-For` for
+connections from 127.0.0.1. So every launch here disables it (`--no-proxy-headers` in the
+Dockerfile and the README command, `proxy_headers=False` in `scripts/manual/serve_no_llm.py`).
+A test checks that a spoofed `X-Forwarded-For` doesn't reset the limit, both in-process and
+through uvicorn. Behind a trusted reverse proxy, every client then shares the proxy's IP
+bucket. To limit per real client, enable proxy headers only with `FORWARDED_ALLOW_IPS` set to
+the proxy's address.
 
-**Scaling caveat.** The rate limiter and metrics are per process. With several workers, each
-enforces its own limit and must be scraped separately.
+**LLM timeouts and fallback.**
+- Each Groq attempt has a `GROQ_TIMEOUT_SECONDS` timeout (default 10).
+- **Only timeouts, 429 and 5xx are retried**, up to `GROQ_MAX_RETRIES` (default 2) times, with
+  exponential backoff (0.2 s, 0.4 s). Other 4xx and non-timeout errors fail immediately.
+- All attempts and sleeps share a `GENERATION_DEADLINE_SECONDS` budget (default 20). Each
+  attempt's timeout is capped by the time left, and no attempt or backoff starts past the
+  deadline, so the worst case is about 20 s.
+- If generation still fails, the API returns the reranked passages with `answer: null`,
+  `error: "generation_failed"`, and increments `rag_errors_total{type="generation_failed"}`.
+
+**Scaling: the limiter is in-memory, per process.** Each uvicorn worker and each container
+keeps its own counters. With N workers or instances, a key can make up to N ×
+`RATE_LIMIT_PER_MIN` requests per minute. Multi-worker or multi-instance deployments need a
+shared store such as **Redis** for the limiter. Metrics are also per process, so each
+worker/instance must be scraped separately (or use the Prometheus client's multiprocess mode).
 
 ## Security
 
@@ -367,8 +386,9 @@ Other measures:
   results.
 - Hard negatives come from BM25 candidate pools, so the eval leans against BM25 and hybrid.
 - Latency was measured on one laptop CPU; there is no GPU path and no concurrency benchmark.
-- The rate limiter is in-process (per worker). Unauthenticated requests are keyed on the
-  client IP as seen by the app, so behind a proxy they share one bucket.
+- The rate limiter is in-memory and per process; multi-worker or multi-instance deployments
+  need Redis (or similar) to share it. Unauthenticated requests are keyed on the TCP peer, so
+  behind a proxy they share one bucket.
 - Answers depend on an external LLM API. The prompt restricts the model to the retrieved
   passages, but there is no automatic faithfulness check.
 

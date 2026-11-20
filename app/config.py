@@ -1,8 +1,14 @@
 ﻿
+import os
+from logging import getLogger
+from pathlib import Path
 from typing import Literal
 
+from dotenv import dotenv_values
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -43,10 +49,12 @@ class Settings(BaseSettings):
     retrieval_k: int = Field(default=20, gt=0)
     rrf_k: int = Field(default=60, gt=0)
     hybrid_dense_weight: float = Field(default=0.5, ge=0.0, le=1.0)
-    # Per attempt; transient failures are retried GROQ_MAX_RETRIES times with
-    # exponential backoff, then the API returns passages with answer=null.
-    groq_timeout_seconds: float = Field(default=30.0, gt=0)
+    # Per attempt. Timeouts, 429 and 5xx are retried GROQ_MAX_RETRIES times
+    # with exponential backoff, all within GENERATION_DEADLINE_SECONDS; then
+    # the API returns the passages with answer=null.
+    groq_timeout_seconds: float = Field(default=10.0, gt=0)
     groq_max_retries: int = Field(default=2, ge=0)
+    generation_deadline_seconds: float = Field(default=20.0, gt=0)
     cors_origins: str = ""
     trusted_hosts: str = "localhost,127.0.0.1,testserver"
     # Requests per minute per API key (per client IP for unauthenticated
@@ -63,3 +71,26 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Removed settings that are now silently ignored (extra="ignore"), mapped to
+# their replacement.
+LEGACY_SETTINGS = {
+    "RATE_LIMIT_REQUESTS": "RATE_LIMIT_PER_MIN",
+    "RATE_LIMIT_WINDOW_SECONDS": "RATE_LIMIT_PER_MIN",
+}
+
+
+def legacy_settings_present(env_file: str | Path = ".env") -> list[str]:
+    """Names of removed settings found in the environment or the .env file."""
+    names = {name.upper() for name in os.environ}
+    if Path(env_file).is_file():
+        names |= {name.upper() for name in dotenv_values(env_file)}
+    return sorted(name for name in LEGACY_SETTINGS if name in names)
+
+
+def warn_legacy_settings(env_file: str | Path = ".env") -> None:
+    for name in legacy_settings_present(env_file):
+        logger.warning(
+            f"legacy_setting_ignored: {name} is no longer used; "
+            f"set {LEGACY_SETTINGS[name]} (requests per minute per API key) instead"
+        )

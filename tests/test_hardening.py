@@ -238,3 +238,82 @@ def test_metrics_requires_key_and_exports_stage_histograms(client, anon_client, 
     for error_type in ("unauthorized", "rate_limited", "generation_failed"):
         assert f'rag_errors_total{{type="{error_type}"}}' in text
     assert "http_requests_total" in text
+
+
+# --- removed settings warn at startup ---------------------------------------
+
+def test_legacy_rate_limit_settings_warn(monkeypatch, tmp_path, caplog):
+    from app.config import legacy_settings_present, warn_legacy_settings
+
+    for name in ("RATE_LIMIT_REQUESTS", "RATE_LIMIT_WINDOW_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+    no_file = tmp_path / "missing.env"
+    assert legacy_settings_present(no_file) == []
+
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "10")
+    env_file = tmp_path / ".env"
+    env_file.write_text("RATE_LIMIT_WINDOW_SECONDS=30\n", encoding="utf-8")
+    assert legacy_settings_present(env_file) == ["RATE_LIMIT_REQUESTS",
+                                                 "RATE_LIMIT_WINDOW_SECONDS"]
+
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        warn_legacy_settings(env_file)
+    messages = [r.getMessage() for r in caplog.records]
+    assert len(messages) == 2
+    assert all("RATE_LIMIT_PER_MIN" in m for m in messages)
+
+
+# --- per-IP limit uses the TCP peer, never X-Forwarded-For --------------------
+
+def _guess(client, i, spoof):
+    return client.get("/metadata", headers={"X-API-Key": f"guess-{i}",
+                                            "X-Forwarded-For": spoof}).status_code
+
+
+def test_spoofed_xff_does_not_reset_ip_limit(anon_client, monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_per_min", 2)
+    codes = [_guess(anon_client, i, f"10.0.0.{i}") for i in range(4)]
+    assert codes == [401, 401, 429, 429]
+
+
+def test_spoofed_xff_does_not_reset_ip_limit_under_uvicorn(monkeypatch):
+    """End to end through uvicorn configured as we deploy it (no proxy headers)."""
+    import socket
+    import threading
+    import time as _time
+
+    import uvicorn
+
+    monkeypatch.setattr(settings, "rate_limit_per_min", 2)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
+                                           log_level="error", proxy_headers=False))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = _time.monotonic() + 30
+    while not server.started and _time.monotonic() < deadline:
+        _time.sleep(0.05)
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}") as client:
+            codes = [client.get("/metadata", headers={"X-API-Key": f"guess-{i}",
+                                                      "X-Forwarded-For": f"10.0.0.{i}"}
+                                ).status_code for i in range(4)]
+    finally:
+        server.should_exit = True
+        thread.join(10)
+    assert codes == [401, 401, 429, 429]
+
+
+def test_every_uvicorn_launch_disables_proxy_headers():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    assert '"--no-proxy-headers"' in (root / "Dockerfile").read_text(encoding="utf-8")
+    assert "proxy_headers=False" in (root / "scripts/manual/serve_no_llm.py").read_text(
+        encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert all("--no-proxy-headers" in line
+               for line in readme.splitlines() if line.startswith("uvicorn app.main:app"))

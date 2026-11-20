@@ -11,7 +11,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.api.routes import router
 from app.artifacts import verify_artifacts
 from app.auth import API_KEY_HEADER, configured_keys, log_auth_configuration
-from app.config import settings
+from app.config import settings, warn_legacy_settings
 from app.generation.groq_generator import GroqGenerator
 from app.metrics import render as render_metrics
 from app.middleware import ProductionMiddleware, key_id_context, request_id_context
@@ -78,6 +78,7 @@ def _configure_logging() -> None:
 
 _configure_logging()
 log_auth_configuration()
+warn_legacy_settings()
 
 
 def create_rag_service() -> RAGService:
