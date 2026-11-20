@@ -130,7 +130,7 @@ default `RERANK_TOP_K`, the number of passages sent to the LLM and returned as c
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "X-API-Key: change-me-demo-key" \
   -d '{"query": "what are the symptoms of diabetes?", "top_k": 5}'
 ```
 
@@ -175,14 +175,16 @@ recorded in `artifacts/v3/manifest.json`. A copy is committed as
 ### 2a. Run with Docker Compose
 
 ```bash
-cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
-docker compose up --build
-curl http://localhost:8000/ready
-export API_KEY=change-me             # one of the values in API_KEYS
+cp .env.example .env                 # set GROQ_API_KEY; replace the demo API_KEYS value before exposing it
+docker compose up --build -d
+curl http://localhost:8000/ready     # 200 once artifacts/v3 exists (step 1)
 curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" -H "X-API-Key: change-me-demo-key" \
   -d '{"query": "what are the symptoms of diabetes?"}'
 ```
+
+`change-me-demo-key` is the demo key from `.env.example`. `/ready` returns 503 until
+`artifacts/v3` has been built, because the artifacts are mounted, not shipped in the image.
 
 The image installs hash-locked CPU-only dependencies and bakes in the pinned model revisions
 (it runs with Hugging Face offline mode). `artifacts/v3` is mounted read-only, never copied into
