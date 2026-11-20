@@ -1,309 +1,272 @@
-﻿# Hybrid RAG over MS MARCO
+﻿# Retrieval-augmented QA over MS MARCO
 
-A Retrieval-Augmented Generation (RAG) API that answers questions using only passages retrieved from an MS MARCO subset.
+A FastAPI service that answers questions from an MS MARCO passage subset. It retrieves
+candidates with a dense bi-encoder, reranks them with a cross-encoder, and has an LLM on Groq
+write an answer grounded in the top passages, returned with citations. Hybrid retrieval
+(dense + BM25 fused with reciprocal rank fusion) is available as a configuration option.
 
-It combines **meaning-based search (FAISS)** and **keyword search (BM25)**, merges them with **Reciprocal Rank Fusion (RRF)**, re-scores the best candidates with a **cross-encoder**, and sends the final passages to an **LLM on Groq** to write a grounded answer with sources.
+## Headline result
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![FastAPI](https://img.shields.io/badge/API-FastAPI-009688)
-![FAISS](https://img.shields.io/badge/dense-FAISS-orange)
-![BM25](https://img.shields.io/badge/lexical-BM25-lightgrey)
-![LLM](https://img.shields.io/badge/LLM-Groq-black)
+**Served system (dense retrieval, cross-encoder rerank of the top 20): MRR@10 = 0.779
+[95% CI 0.759, 0.801]** on 1,000 queries from the official MS MARCO dev-small qrels.
 
----
+This was measured on a **150,000-passage subset**, not the 8.8M-passage collection:
 
-## Why hybrid?
+| Passages in the corpus | Count |
+|---|---|
+| Relevant passages of the 1,500 sampled eval + tune queries | 1,613 |
+| Hard negatives: random sample of each query's official `top1000.dev` pool | 72,967 |
+| Random passages from the full collection | 75,420 |
+| **Total** | **150,000** |
 
-| Method | Good at | Bad at |
-|---|---|---|
-| Dense (FAISS) | Finding passages with the same *meaning*, even with different words | Exact names, codes, rare terms |
-| BM25 | Exact keyword matches | Synonyms, paraphrased questions |
-| **Hybrid (RRF)** | Covers both weaknesses | Slightly more latency and complexity |
-| **Cross-encoder rerank** | Picks the truly best passages from the merged list | Slow if run on too many passages, so only top candidates are reranked |
+Because the corpus is a subset, these scores are **not comparable to full-corpus MS MARCO
+leaderboard numbers**. Source: [`manifests/v3.json`](manifests/v3.json),
+[`eval/results/20261118-v3-0d90c58/metrics.json`](eval/results/20261118-v3-0d90c58/metrics.json).
 
----
+## Results
+
+All numbers below come from
+[`eval/results/20261118-v3-0d90c58/metrics.json`](eval/results/20261118-v3-0d90c58/metrics.json)
+(per-query rankings in `per_query.jsonl` next to it): 1,000 eval queries, corpus v3, git
+`0d90c58`, clean tree. Brackets are 95% bootstrap confidence intervals (10,000 resamples over
+queries, seed 42). Each retriever returns its top 100; reranked systems rerank the top N of their
+base ranking and keep the base order below N.
+
+| System | MRR@10 | nDCG@10 | Recall@10 | Recall@100 | p50 ms | p95 ms |
+|---|---|---|---|---|---|---|
+| BM25 | 0.455 [0.428, 0.482] | 0.499 [0.473, 0.526] | 0.655 [0.626, 0.684] | 0.872 [0.851, 0.891] | 406 | 770 |
+| Dense | 0.697 [0.674, 0.720] | 0.746 [0.726, 0.765] | 0.916 [0.899, 0.932] | 0.990 [0.984, 0.996] | 81 | 123 |
+| Hybrid (RRF, k=60) | 0.596 [0.570, 0.622] | 0.638 [0.614, 0.662] | 0.798 [0.773, 0.822] | 0.993 [0.988, 0.997] | 496 | 872 |
+| Hybrid + rerank top 10 | 0.705 [0.680, 0.731] | 0.721 [0.696, 0.745] | 0.798 [0.773, 0.822] | 0.993 [0.988, 0.997] | 870 | 1,355 |
+| **Dense + rerank top 20 (served)** | **0.779 [0.759, 0.801]** | **0.815 [0.797, 0.833]** | **0.942 [0.928, 0.955]** | 0.990 [0.984, 0.996] | 787 | 1,190 |
+| Dense + rerank top 50 (reference only) | 0.782 [0.761, 0.802] | 0.819 [0.801, 0.836] | 0.950 [0.936, 0.962] | 0.990 [0.984, 0.996] | 1,913 | 2,778 |
+
+**Paired differences** (same queries, same bootstrap resamples), mean [95% CI]:
+
+| Comparison | MRR@10 | nDCG@10 | Recall@10 |
+|---|---|---|---|
+| Served − dense | +0.082 [+0.063, +0.101] | +0.069 [+0.054, +0.084] | +0.026 [+0.014, +0.038] |
+| Served − hybrid + rerank top 10 | +0.074 [+0.057, +0.092] | +0.094 [+0.077, +0.112] | +0.144 [+0.121, +0.167] |
+| Dense + rerank top 50 − served | +0.002 [−0.002, +0.007] | +0.004 [−0.001, +0.009] | +0.008 [−0.001, +0.016] |
+| Hybrid − BM25 | +0.141 [+0.125, +0.158] | +0.139 [+0.125, +0.154] | +0.143 [+0.122, +0.164] |
+| Hybrid − dense | −0.101 [−0.123, −0.078] | −0.107 [−0.127, −0.087] | −0.118 [−0.142, −0.094] |
+| Hybrid + rerank top 10 − hybrid | +0.109 [+0.091, +0.127] | +0.082 [+0.069, +0.095] | 0 (rerank only reorders the top 10) |
+
+How to read this:
+
+- **Reranking dense top 20 improves on dense alone:** +0.082 MRR@10, CI excludes 0, at a cost of
+  about 700 ms at p50 on this CPU.
+- **Rerank top 50 vs top 20:** the CI includes 0, so no improvement is shown; it is about 2.4×
+  slower at p50. Top 50 is reported for reference and was not eligible for serving.
+- **Hybrid vs dense with reranking:** the served-vs-hybrid + rerank top 10 difference is
+  confounded by rerank depth (20 vs 10), so it does **not** show that hybrid retrieval is worse.
+  At a matched rerank depth of 50 on the tune split, weighted-RRF + rerank and dense + rerank
+  tie: MRR@10 difference +0.0005 [−0.0028, +0.0056]
+  ([`eval/results/20261117-v3-tune-c858705/metrics.json`](eval/results/20261117-v3-tune-c858705/metrics.json)).
+  Hybrid stays available as `RETRIEVAL_MODE=hybrid`.
+- **The eval leans against BM25.** Every hard negative comes from the official `top1000.dev`
+  pools, which are BM25 candidates, so the distractors are exactly the passages BM25 ranks
+  highly. This hurts BM25 and, through fusion, hybrid retrieval.
+- **Latency** is CPU-only (Intel i5-1235U, 12 logical CPUs, 10 torch threads, 15.7 GB RAM,
+  Windows 11), queries run one at a time in a single process. In hybrid mode, dense and BM25 run
+  sequentially. Generation (Groq) is not included. Per-stage p50/p95: dense 81/123 ms, BM25
+  406/770 ms, rerank of 20 dense candidates 697/1,103 ms.
+- MS MARCO qrels are sparse (about one judged passage per query), so unjudged relevant passages
+  count as misses.
+
+### How the served configuration was chosen
+
+The configuration was selected on a **separate tune split** (500 dev-small queries, disjoint
+from the 1,000 eval queries). The eval split was then run once with the chosen system. The
+selection rules were committed before the eval run
+([`evaluation/tune_select.py`](evaluation/tune_select.py)):
+
+1. **Grid:** dense + rerank and weighted-RRF + rerank (dense weight 0.5–0.9), at rerank depths
+   10, 20 and 50.
+2. **Hybrid vs dense:** serve weighted-RRF only if it beats the best dense + rerank on tune
+   with a paired 95% CI of the MRR@10 difference entirely above 0. It did not (see above).
+3. **Latency rule:** serve the smallest rerank depth within 0.01 MRR@10 of the best on tune.
+   On tune, depth 50 scored 0.8003 and depth 20 scored 0.7925, so depth 20 is served.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    U([User Query]) --> API[FastAPI REST API]
-    API --> MW{{Rate limit + Trusted hosts + CORS}}
-    MW --> HR[Hybrid Retrieval]
+    C([Client]) -->|POST /api/v1/query| API[FastAPI<br/>rate limit · trusted hosts · request id]
+    API --> MODE{RETRIEVAL_MODE}
+    MODE -->|dense, default| D[Dense retrieval<br/>all-MiniLM-L6-v2 + FAISS<br/>top RERANK_DEPTH = 20]
+    MODE -->|hybrid| H[Dense top RETRIEVAL_K + BM25 top RETRIEVAL_K<br/>weighted RRF fusion<br/>top RERANK_DEPTH]
+    D --> R[Cross-encoder rerank<br/>ms-marco-MiniLM-L-6-v2<br/>keep top_k, default 5]
+    H --> R
+    R --> G[Groq LLM<br/>prompt contains only the reranked passages]
+    G --> A([answer + citations + latency_ms])
 
-    HR --> D[Dense Search<br/>MiniLM embeddings + FAISS<br/>top 20]
-    HR --> B[Lexical Search<br/>BM25<br/>top 20]
-
-    D --> F[RRF Fusion<br/>k = 60<br/>keep top 10]
-    B --> F
-
-    F --> R[Cross-Encoder Rerank<br/>ms-marco-MiniLM-L-6-v2<br/>keep top 5]
-    R --> P[Build grounded prompt<br/>question + 5 passages]
-    P --> L[Groq LLM<br/>openai/gpt-oss-120b]
-    L --> A([Answer + Source passages])
-
-    classDef retrieve fill:#e8f1ff,stroke:#3b82f6,color:#111
-    classDef rank fill:#fff4e5,stroke:#f59e0b,color:#111
-    classDef gen fill:#e9f9ee,stroke:#22c55e,color:#111
-    class D,B retrieve
-    class F,R rank
-    class P,L gen
+    M[(artifacts/v3<br/>manifest.json sha256)] -.verified before load.-> D
+    M -.verified before unpickling.-> H
 ```
 
----
+Every artifact file is checked against the SHA-256 in `manifest.json` before it is loaded; the
+BM25 pickles are verified before they are unpickled. A missing or modified artifact makes the
+query endpoint return 503.
 
-## Request flow
+## API
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Client
-    participant A as FastAPI
-    participant D as FAISS (dense)
-    participant B as BM25 (lexical)
-    participant X as Cross-Encoder
-    participant G as Groq LLM
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/query` | Answer a question |
+| `GET` | `/health` | Liveness |
+| `GET` | `/ready` | 200 when the configured artifacts and `GROQ_API_KEY` are present, else 503 |
+| `GET` | `/metadata` | Model names, artifact versions, retrieval mode, rerank depth |
 
-    C->>A: POST question
-    A->>A: Validate input, check rate limit
-    par Parallel retrieval
-        A->>D: Embed query, search top 20
-        D-->>A: Dense ranked list
-    and
-        A->>B: Tokenize query, search top 20
-        B-->>A: BM25 ranked list
-    end
-    A->>A: RRF merge, keep top 10
-    A->>X: Score (query, passage) pairs
-    X-->>A: Reranked, keep top 5
-    A->>G: Prompt with only these 5 passages
-    G-->>A: Grounded answer
-    A-->>C: Answer + sources
+Request body: `query` (string, 1–2,000 characters) and optional `top_k` (integer 1–20,
+default `RERANK_TOP_K`, the number of passages sent to the LLM and returned as citations).
+
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "what are the symptoms of diabetes?", "top_k": 5}'
 ```
 
-> Note: whether dense and BM25 run truly in parallel or one after another depends on the implementation in `app/`. Adjust this diagram to match the code.
+Response shape:
 
----
-
-## How the candidate list shrinks
-
-```mermaid
-flowchart LR
-    A[Full passage subset] -->|Dense top 20| C[20]
-    A -->|BM25 top 20| D[20]
-    C --> E[Up to 40 unique]
-    D --> E
-    E -->|RRF| F[Top 10]
-    F -->|Cross-encoder| G[Top 5]
-    G -->|Prompt| H[LLM answer]
+```json
+{
+  "answer": "…",
+  "citations": [{"passage_id": 123, "passage_text": "…", "score": 8.75}],
+  "latency_ms": 812.4
+}
 ```
 
-Fusion rule used (RRF, `k = 60`):
-
-```
-score(passage) = 1 / (60 + rank_in_dense) + 1 / (60 + rank_in_bm25)
-```
-
-A passage ranked high by **both** retrievers wins. RRF only uses ranks, so you do not need to normalize FAISS and BM25 scores, which live on different scales.
-
----
-
-## Tech stack
-
-| Layer | Tool |
-|---|---|
-| API | FastAPI, Uvicorn, Pydantic, pydantic-settings |
-| Dense retrieval | `sentence-transformers/all-MiniLM-L6-v2` + `faiss-cpu` |
-| Lexical retrieval | `rank-bm25` |
-| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
-| LLM | Groq API, default model `openai/gpt-oss-120b` |
-| Data | MS MARCO passage subset (Parquet via pandas + pyarrow) |
-| HTTP client | httpx |
-
----
-
-## Project structure
-
-```
-hybrid-rag-ms-marco/
-├── app/            # FastAPI app, retrieval, fusion, reranking, generation
-├── scripts/        # Data prep and index building
-├── tests/          # Test suite
-├── .env.example    # All configuration options
-├── requirements.txt
-└── README.md
-```
-
-<!-- TODO: expand app/ into its real files (e.g. main.py, retrieval.py, ...) after checking the code -->
-
----
+Errors: 400 invalid query, 422 validation error, 429 rate limited, 500 unexpected pipeline
+error, 502 LLM failure, 503 artifacts missing or failing verification.
 
 ## Quick start
 
-### 1. Install
+### 1. Build corpus v3 and its indices
+
+The artifacts are not in the repository. Building them downloads the official MS MARCO files
+(1,057,717,952 + 687,414,398 bytes, MD5-checked against the values recorded by ir_datasets) and
+needs several GB of free disk.
 
 ```bash
-git clone https://github.com/manojkumargudge/hybrid-rag-ms-marco.git
-cd hybrid-rag-ms-marco
-
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+
+python -m scripts.download_msmarco                       # -> artifacts/raw/
+python -m scripts.prepare_data                           # -> artifacts/v3/ (passages, query splits, qrels)
+python -m scripts.build_indices --only bm25              # BM25 index
+python -m scripts.build_indices --only dense             # FAISS index (CPU: 3,295 s on the eval laptop)
+python -m scripts.verify_artifacts                       # sha256 + row-count checks
 ```
 
-### 2. Configure
+Every step is deterministic: seed 42, pinned model revisions, and the sampling rules are
+recorded in `artifacts/v3/manifest.json`. A copy is committed as
+[`manifests/v3.json`](manifests/v3.json). The scripts refuse to overwrite existing artifacts.
+
+### 2a. Run with Docker Compose
 
 ```bash
-cp .env.example .env
-# open .env and set GROQ_API_KEY
+cp .env.example .env                 # set GROQ_API_KEY
+docker compose up --build
+curl http://localhost:8000/ready
 ```
 
-Get a key from the [Groq console](https://console.groq.com/).
+The image installs hash-locked CPU-only dependencies and bakes in the pinned model revisions
+(it runs with Hugging Face offline mode). `artifacts/v3` is mounted read-only, never copied into
+the image.
 
-### 3. Build data and indices
+### 2b. Run locally
 
 ```bash
-# TODO: replace with the real script names from scripts/
-python scripts/<prepare_data>.py
-python scripts/<build_indices>.py
+cp .env.example .env                 # set GROQ_API_KEY
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-This should produce:
-
-- `data/passages_subset.parquet`
-- `indices/dense_index.faiss`
-- `indices/bm25/bm25_index.pkl`
-- `indices/bm25/tokenized_corpus.pkl`
-
-### 4. Run the API
+### 3. Reproduce the evaluation
 
 ```bash
-# TODO: confirm the module path
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m evaluation.tune_select     # tune split only: config selection
+python -m evaluation.run_eval        # eval split: writes eval/results/<date>-v3-<commit>/
 ```
 
-Open `http://localhost:8000/docs` for the interactive Swagger UI (FastAPI default).
-
-### 5. Ask a question
-
-```bash
-# TODO: confirm the route and request body
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "what causes the northern lights"}'
-```
-
-### 6. Run tests
-
-```bash
-pytest tests/
-```
-
----
+`run_eval --estimate 20` times 20 queries and writes nothing. The full eval spent 2,753 s
+(about 46 minutes) loading models and running queries on the hardware above
+(`timing_seconds` in its `metrics.json`).
 
 ## Configuration
 
-All settings come from environment variables (see `.env.example`).
-
-### Models
+All settings are environment variables (see [`.env.example`](.env.example)).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GROQ_API_KEY` | none | Required. Your Groq key |
-| `GROQ_MODEL` | `openai/gpt-oss-120b` | LLM used for the final answer |
-| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Query and passage embeddings |
-| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Final re-scoring |
-
-### Retrieval tuning
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `RETRIEVAL_MODE` | `dense` | `dense` (default, chosen on the tune split) or `hybrid` (dense + BM25 with RRF) |
-| `RERANK_DEPTH` | `20` | Candidates from the retriever that the cross-encoder reranks |
-| `RERANK_TOP_K` | `5` | Passages sent to the LLM |
-| `RETRIEVAL_K` | `20` | Hybrid only: candidates fetched from each retriever before RRF |
-| `RRF_K` | `60` | Hybrid only: RRF smoothing constant |
+| `GROQ_API_KEY` | empty | Required for answers |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | LLM for the final answer |
+| `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `30` / `2` | LLM timeout and retries on transient errors |
+| `EMBEDDING_MODEL` / `EMBEDDING_MODEL_REVISION` | `sentence-transformers/all-MiniLM-L6-v2` @ `1110a243…` | Dense encoder (pinned commit) |
+| `RERANKER_MODEL` / `RERANKER_MODEL_REVISION` | `cross-encoder/ms-marco-MiniLM-L-6-v2` @ `233902d2…` | Cross-encoder (pinned commit) |
+| `RETRIEVAL_MODE` | `dense` | `dense` or `hybrid` |
+| `RERANK_DEPTH` | `20` | Candidates the cross-encoder reranks |
+| `RERANK_TOP_K` | `5` | Passages sent to the LLM (default for `top_k`) |
+| `RETRIEVAL_K` | `20` | Hybrid only: candidates from each retriever before fusion |
+| `RRF_K` | `60` | Hybrid only: RRF constant |
 | `HYBRID_DENSE_WEIGHT` | `0.5` | Hybrid only: dense weight in RRF (0.5 = standard RRF) |
-
-### Paths and versions
-
-| Variable | Default |
-|---|---|
-| `PASSAGES_PATH` | `data/passages_subset.parquet` |
-| `DENSE_INDEX_PATH` | `indices/dense_index.faiss` |
-| `BM25_INDEX_PATH` | `indices/bm25/bm25_index.pkl` |
-| `BM25_CORPUS_PATH` | `indices/bm25/tokenized_corpus.pkl` |
-| `INDEX_VERSION` / `DATA_VERSION` | `v1` |
-| `APPLICATION_VERSION` / `GIT_VERSION` | `1.0.0` / `unknown` |
-
-### Reliability and security
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `GROQ_TIMEOUT_SECONDS` | `30` | Max wait for the LLM |
-| `GROQ_MAX_RETRIES` | `2` | Retries on LLM failure |
-| `RATE_LIMIT_REQUESTS` | `60` | Requests allowed per window |
-| `RATE_LIMIT_WINDOW_SECONDS` | `60` | Window size |
-| `TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Allowed Host headers |
+| `MANIFEST_PATH`, `PASSAGES_PATH`, `DENSE_INDEX_PATH`, `BM25_INDEX_PATH`, `BM25_CORPUS_PATH` | `artifacts/v3/…` | Artifact locations; BM25 files are needed only in hybrid mode |
+| `INDEX_VERSION` / `DATA_VERSION` | `v3` | Reported by `/metadata` |
+| `APPLICATION_VERSION` / `GIT_VERSION` | `1.0.0` / `unknown` | Reported by `/metadata` |
+| `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW_SECONDS` | `60` / `60` | Per-client-IP limit, in-process |
+| `TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Allowed `Host` headers |
 | `CORS_ORIGINS` | empty | Allowed browser origins (empty = none) |
 
----
+## Project layout
 
-## Design decisions
-
-- **Rank-based fusion (RRF) instead of score mixing.** Dense and BM25 scores are not comparable. Ranks are.
-- **Small funnel: 20 → 10 → 5.** The cross-encoder is the slowest step. It only sees 10 passages.
-- **Grounded generation.** The LLM only sees the retrieved passages, which reduces made-up answers. It does not remove them.
-- **Versioned data and indices** (`DATA_VERSION`, `INDEX_VERSION`) so you can tell which index produced which answer.
-- **Everything configurable by env var**, so you can tune retrieval without code changes.
-
----
-
-## Known limitations
-
-- Runs on a **subset** of MS MARCO, not the full corpus. Answers can only be as good as that subset.
-- `faiss-cpu` with a flat or simple index will not scale to millions of passages without changing index type.
-- Answer quality depends on an external API (Groq). If it is down or rate limited, generation fails.
-- The LLM can still ignore or misread the context. No automatic faithfulness check is described yet.
-
-<!-- TODO: add real measured numbers below. Without them, "hybrid beats dense-only" is a claim, not a result. -->
-
----
-
-## Evaluation (to fill in)
-
-Run the same queries through each variant and report the results here.
-
-| Pipeline | MRR@10 | Recall@10 | Avg latency (ms) |
-|---|---|---|---|
-| BM25 only | – | – | – |
-| Dense only | – | – | – |
-| Hybrid (RRF) | – | – | – |
-| Hybrid + rerank | – | – | – |
-
----
-
-## Roadmap
-
-```mermaid
-flowchart LR
-    A[Now<br/>Hybrid + rerank + LLM] --> B[Evaluation<br/>MRR, Recall, latency table]
-    B --> C[Docker + CI]
-    C --> D[Streaming answers]
-    D --> E[Answer faithfulness check]
-    E --> F[Larger corpus + better index]
+```
+app/                 FastAPI app, retrievers, reranker, generator, artifact verification
+scripts/             download_msmarco, prepare_data, build_indices, verify_artifacts, lock_deps
+scripts/manual/      smoke tests that need real artifacts, models or network
+evaluation/          metrics, run_eval (eval split), tune_select (tune split)
+eval/results/        committed metrics.json + per_query.jsonl for each run
+manifests/           committed artifact manifests (v3 served; v2 superseded)
+tests/               hermetic tests (tiny MS MARCO-format fixture; no network or models)
 ```
 
----
+## Development
+
+```bash
+ruff check app evaluation tests scripts
+pytest -q
+```
+
+CI runs lint, the tests, a lockfile-drift check, a Docker build, an offline model-load check
+and a container smoke test. Dependencies are pinned in `requirements.txt` /
+`requirements-dev.txt` and hash-locked for Linux in `requirements*.lock`
+(regenerate with `scripts/lock_deps.sh`).
+
+## Limitations
+
+- The corpus is a 150k-passage subset, so absolute scores are not comparable to full-corpus
+  results.
+- Hard negatives come from BM25 candidate pools, so the eval leans against BM25 and hybrid.
+- Latency was measured on one laptop CPU; there is no GPU path and no concurrency benchmark.
+- The rate limiter is in-process and keyed on client IP, so it does not coordinate across
+  workers or see real client IPs behind a proxy.
+- Answers depend on an external LLM API. The prompt restricts the model to the retrieved
+  passages, but there is no automatic faithfulness check.
+
+## History
+
+An earlier 20-query evaluation used relevance labels judged by hand from this pipeline's own
+top-5 results, so its Recall@5 was 1.0 by construction. It is kept only as history in
+[`evaluation/selfjudged/`](evaluation/selfjudged/) and is not used for any result above.
 
 ## License
 
-TODO: add a license (MIT is common for portfolio projects).
+[MIT](LICENSE).
 
 ## Acknowledgements
 
-- [MS MARCO](https://microsoft.github.io/msmarco/) dataset
-- [Sentence-Transformers](https://www.sbert.net/)
-- [FAISS](https://github.com/facebookresearch/faiss)
-- [rank-bm25](https://github.com/dorianbrown/rank_bm25)
-- [Groq](https://groq.com/)
+[MS MARCO](https://microsoft.github.io/msmarco/) ·
+[Sentence-Transformers](https://www.sbert.net/) ·
+[FAISS](https://github.com/facebookresearch/faiss) ·
+[rank-bm25](https://github.com/dorianbrown/rank_bm25) ·
+[Groq](https://groq.com/)
