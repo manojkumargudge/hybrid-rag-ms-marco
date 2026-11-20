@@ -3,18 +3,23 @@
     python -m scripts.manual.parity_check <results_dir> [n] [base_url]
 
 Sends the first n eval-split queries (default 50) to POST /api/v1/query with
-top_k=10 and compares passage ids, in order, to per_query.jsonl.
+top_k=10 and compares passage ids, in order, to per_query.jsonl. Sends the
+API key from the API_KEY environment variable (one of the server's API_KEYS).
 """
 
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
 
+HEADERS = {"X-API-Key": os.environ.get("API_KEY", "")}
+
 
 def post(url: str, payload: dict) -> dict:
     request = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}
+        url, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", **HEADERS},
     )
     with urllib.request.urlopen(request, timeout=120) as response:
         return json.loads(response.read())
@@ -27,7 +32,8 @@ def main() -> None:
 
     metrics = json.loads((results / "metrics.json").read_text(encoding="utf-8"))
     served = metrics["served"]["system"]
-    with urllib.request.urlopen(f"{base}/metadata", timeout=30) as response:
+    meta_request = urllib.request.Request(f"{base}/metadata", headers=HEADERS)
+    with urllib.request.urlopen(meta_request, timeout=30) as response:
         meta = json.loads(response.read())
     print(f"API: retrieval_mode={meta['retrieval_mode']} rerank_depth={meta['rerank_depth']}; "
           f"harness served system: {served}")

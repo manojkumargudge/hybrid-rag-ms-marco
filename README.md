@@ -111,12 +111,18 @@ query endpoint return 503.
 
 ## API
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/v1/query` | Answer a question |
-| `GET` | `/health` | Liveness |
-| `GET` | `/ready` | 200 when the configured artifacts and `GROQ_API_KEY` are present, else 503 |
-| `GET` | `/metadata` | Model names, artifact versions, retrieval mode, rerank depth |
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/api/v1/query` | `X-API-Key` | Answer a question |
+| `GET` | `/metadata` | `X-API-Key` | Model names, artifact versions, retrieval mode, rerank depth |
+| `GET` | `/health` | open | Liveness |
+| `GET` | `/ready` | open | 200 when the configured artifacts, `GROQ_API_KEY` and API keys are present, else 503 |
+
+**Authentication:** send one of the keys in `API_KEYS` (comma-separated) in the `X-API-Key`
+header. Keys are compared in constant time against every configured key. A missing or wrong
+key gets 401. With no keys configured, every protected request gets 401 (fail closed). Auth is
+off only when `AUTH_DISABLED=true`, which logs a warning at startup and is meant for local
+development only.
 
 Request body: `query` (string, 1–2,000 characters) and optional `top_k` (integer 1–20,
 default `RERANK_TOP_K`, the number of passages sent to the LLM and returned as citations).
@@ -124,6 +130,7 @@ default `RERANK_TOP_K`, the number of passages sent to the LLM and returned as c
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
   -d '{"query": "what are the symptoms of diabetes?", "top_k": 5}'
 ```
 
@@ -137,7 +144,8 @@ Response shape:
 }
 ```
 
-Errors: 400 invalid query, 422 validation error, 429 rate limited, 500 unexpected pipeline
+Errors: 400 invalid query, 401 missing or invalid API key, 422 validation error, 429 rate
+limited, 500 unexpected pipeline
 error, 502 LLM failure, 503 artifacts missing or failing verification.
 
 ## Quick start
@@ -167,9 +175,13 @@ recorded in `artifacts/v3/manifest.json`. A copy is committed as
 ### 2a. Run with Docker Compose
 
 ```bash
-cp .env.example .env                 # set GROQ_API_KEY
+cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
 docker compose up --build
 curl http://localhost:8000/ready
+export API_KEY=change-me             # one of the values in API_KEYS
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" -H "X-API-Key: $API_KEY" \
+  -d '{"query": "what are the symptoms of diabetes?"}'
 ```
 
 The image installs hash-locked CPU-only dependencies and bakes in the pinned model revisions
@@ -179,7 +191,7 @@ the image.
 ### 2b. Run locally
 
 ```bash
-cp .env.example .env                 # set GROQ_API_KEY
+cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -201,6 +213,8 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | Variable | Default | Purpose |
 |---|---|---|
 | `GROQ_API_KEY` | empty | Required for answers |
+| `API_KEYS` | empty | Comma-separated client keys accepted in `X-API-Key`; empty = every protected request gets 401 |
+| `AUTH_DISABLED` | `false` | `true` turns API-key auth off (local development only; logs a warning) |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | LLM for the final answer |
 | `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `30` / `2` | LLM timeout and retries on transient errors |
 | `EMBEDDING_MODEL` / `EMBEDDING_MODEL_REVISION` | `sentence-transformers/all-MiniLM-L6-v2` @ `1110a243…` | Dense encoder (pinned commit) |

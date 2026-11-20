@@ -3,13 +3,19 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
 from app.artifacts import verify_artifacts
+from app.auth import (
+    API_KEY_HEADER,
+    configured_keys,
+    log_auth_configuration,
+    require_api_key,
+)
 from app.config import settings
 from app.generation.groq_generator import GroqGenerator
 from app.middleware import ProductionMiddleware, request_id_context
@@ -54,6 +60,7 @@ def _configure_logging() -> None:
 
 
 _configure_logging()
+log_auth_configuration()
 
 
 def create_rag_service() -> RAGService:
@@ -126,7 +133,7 @@ app.add_middleware(
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-Request-ID"],
+    allow_headers=["Content-Type", "X-Request-ID", API_KEY_HEADER],
 )
 app.add_middleware(
     TrustedHostMiddleware,
@@ -165,7 +172,7 @@ def health_check() -> dict:
     }
 
 
-@app.get("/metadata")
+@app.get("/metadata", dependencies=[Depends(require_api_key)])
 def metadata() -> dict:
     """Return non-sensitive model, artifact, and application versions."""
 
@@ -201,6 +208,8 @@ def readiness_check() -> JSONResponse:
     ]
     if not settings.groq_api_key:
         missing.append("groq_api_key")
+    if not settings.auth_disabled and not configured_keys():
+        missing.append("api_keys")
 
     if missing:
         return JSONResponse(

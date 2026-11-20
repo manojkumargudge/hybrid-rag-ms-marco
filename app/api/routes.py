@@ -1,9 +1,8 @@
-from hmac import compare_digest
 from logging import getLogger
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.config import settings
+from app.auth import require_api_key
 from app.schemas.query import QueryRequest, QueryResponse
 
 logger = getLogger(__name__)
@@ -11,6 +10,7 @@ logger = getLogger(__name__)
 router = APIRouter(
     prefix="/api/v1",
     tags=["RAG"],
+    dependencies=[Depends(require_api_key)],
 )
 
 
@@ -23,18 +23,8 @@ def query_rag(
     query_request: QueryRequest,
 ) -> QueryResponse:
     """
-    Execute the complete Hybrid RAG pipeline.
+    Run the RAG pipeline (retrieve -> rerank -> generate). Requires X-API-Key.
     """
-
-    configured_api_key = settings.api_key
-    if configured_api_key:
-        provided_api_key = request.headers.get("X-API-Key", "")
-        if not compare_digest(provided_api_key, configured_api_key):
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid or missing API key.",
-                headers={"WWW-Authenticate": "ApiKey"},
-            )
 
     try:
         rag_service = request.app.state.get_rag_service()
