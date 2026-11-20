@@ -253,10 +253,35 @@ ruff check app evaluation tests scripts
 pytest -q
 ```
 
-CI runs lint, the tests, a lockfile-drift check, a Docker build, an offline model-load check
-and a container smoke test. Dependencies are pinned in `requirements.txt` /
-`requirements-dev.txt` and hash-locked for Linux in `requirements*.lock`
+CI runs lint, the tests, a lockfile-drift check, a security audit (below), a Docker build,
+an offline model-load check and a container smoke test. Dependencies are pinned in
+`requirements.txt` / `requirements-dev.txt` and hash-locked for Linux in `requirements*.lock`
 (regenerate with `scripts/lock_deps.sh`).
+
+## Security
+
+The CI `security` job runs [`scripts/security_audit.sh`](scripts/security_audit.sh):
+
+- **pip-audit** (2.10.1) on both lockfiles (`requirements.lock`, `requirements-dev.lock`) in
+  `--strict` mode, so any package it cannot audit fails the job. Nothing is installed:
+  `--require-hashes --disable-pip`.
+- **bandit** (1.9.4) on `app/` at medium severity and above (`-ll`).
+
+Run it locally with `pip install pip-audit==2.10.1 bandit==1.9.4 && sh scripts/security_audit.sh`.
+
+Accepted findings and workarounds, each with its reason:
+
+| Tool | Finding | Where | Decision and reason |
+|---|---|---|---|
+| bandit | B301, pickle deserialization (medium) | `app/retrieval/bm25_retriever.py`, both `pickle.load` calls | **Ignored with `# nosec B301`.** The BM25 index is a `rank_bm25` object stored as a pickle. Immediately before each load, `verify_artifacts` checks the file's SHA-256 against `manifest.json`, and a mismatch raises before anything is unpickled. A test covers tampered-pickle rejection. The residual risk is someone who can write both the pickle and the manifest; artifacts are mounted read-only. |
+| bandit | B403, `import pickle` (low) | same file | Below the `-ll` gate; same reason as B301. |
+| pip-audit | `torch==2.13.0+cpu` cannot be looked up | both lockfiles | **Audited as `torch==2.13.0`.** `+cpu` is a local version from the PyTorch CPU index and isn't on PyPI. The script audits a temporary copy of each lockfile with the suffix removed (same upstream release, CPU-only build) and fails if that copy is empty or lost torch. |
+
+Other measures:
+- API-key auth fails closed (see [API](#api)).
+- Artifacts are SHA-256-verified before load.
+- Models are pinned to commit SHAs and baked into the image, which runs offline as a non-root user.
+- Dependencies are hash-locked.
 
 ## Limitations
 
