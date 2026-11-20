@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.main import app
+from app.middleware import rate_limiter
 
 TEST_API_KEY = "test-key"
 _client_ids = count()
@@ -12,9 +13,14 @@ _client_ids = count()
 
 @pytest.fixture(autouse=True)
 def _auth_settings(monkeypatch):
-    """Every test runs with auth on and one known key (independent of .env)."""
+    """Every test runs with auth on, one known key, the default rate limit and
+    an empty limiter (independent of .env and of earlier tests)."""
     monkeypatch.setattr(settings, "api_keys", TEST_API_KEY)
     monkeypatch.setattr(settings, "auth_disabled", False)
+    monkeypatch.setattr(settings, "rate_limit_per_min", 60)
+    rate_limiter.reset()
+    yield
+    rate_limiter.reset()
 
 
 def _new_client(**headers) -> TestClient:

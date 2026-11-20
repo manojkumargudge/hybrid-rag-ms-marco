@@ -1,6 +1,5 @@
 ﻿from unittest.mock import Mock
 
-from app.config import settings
 from app.main import app
 
 
@@ -200,19 +199,3 @@ def test_query_service_internal_error(client):
 
     finally:
         app.state.rag_service = original_service
-
-
-def test_rate_limit_returns_429_after_configured_limit(client):
-    limit = settings.rate_limit_requests
-    responses = [client.get("/metadata") for _ in range(limit + 1)]
-
-    assert all(r.status_code == 200 for r in responses[:limit])
-    assert responses[-1].status_code == 429
-    assert responses[-1].headers["Retry-After"] == str(
-        settings.rate_limit_window_seconds
-    )
-
-
-def test_rate_limit_is_per_client(client):
-    """A fresh client is not affected by another client's usage."""
-    assert client.get("/metadata").status_code == 200

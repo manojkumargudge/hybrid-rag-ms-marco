@@ -1,14 +1,13 @@
-"""API-key authentication (X-API-Key header).
+"""API-key helpers (X-API-Key header).
 
-Keys come from API_KEYS (comma-separated). Authentication is on unless
-AUTH_DISABLED=true. With auth on and no keys configured, every protected
-request is rejected (fail closed).
+Keys come from API_KEYS (comma-separated). Enforcement happens for every
+path except an explicit allowlist in app.middleware.ProductionMiddleware.
+Authentication is on unless AUTH_DISABLED=true. With auth on and no keys
+configured, every protected request is rejected (fail closed).
 """
 
 from hmac import compare_digest
 from logging import getLogger
-
-from fastapi import HTTPException, Request
 
 from app.config import settings
 
@@ -29,18 +28,6 @@ def is_valid_key(provided: str | None, keys: list[bytes]) -> bool:
     for key in keys:
         matched |= compare_digest(candidate, key)
     return matched
-
-
-def require_api_key(request: Request) -> None:
-    """FastAPI dependency: 401 unless X-API-Key matches a configured key."""
-    if settings.auth_disabled:
-        return
-    if not is_valid_key(request.headers.get(API_KEY_HEADER), configured_keys()):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or missing API key.",
-            headers={"WWW-Authenticate": "ApiKey"},
-        )
 
 
 def log_auth_configuration() -> None:

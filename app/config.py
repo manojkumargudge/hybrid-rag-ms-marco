@@ -43,12 +43,16 @@ class Settings(BaseSettings):
     retrieval_k: int = Field(default=20, gt=0)
     rrf_k: int = Field(default=60, gt=0)
     hybrid_dense_weight: float = Field(default=0.5, ge=0.0, le=1.0)
-    groq_timeout_seconds: float = 30.0
-    groq_max_retries: int = 2
+    # Per attempt; transient failures are retried GROQ_MAX_RETRIES times with
+    # exponential backoff, then the API returns passages with answer=null.
+    groq_timeout_seconds: float = Field(default=30.0, gt=0)
+    groq_max_retries: int = Field(default=2, ge=0)
     cors_origins: str = ""
     trusted_hosts: str = "localhost,127.0.0.1,testserver"
-    rate_limit_requests: int = 60
-    rate_limit_window_seconds: int = 60
+    # Requests per minute per API key (per client IP for unauthenticated
+    # requests); 0 disables. /health and /ready are never limited.
+    rate_limit_per_min: int = Field(default=60, ge=0)
+    max_query_chars: int = Field(default=2000, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
