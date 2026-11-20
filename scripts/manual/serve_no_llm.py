@@ -21,4 +21,5 @@ def _no_llm(self, query, passages):
 
 if __name__ == "__main__":
     GroqGenerator.generate = _no_llm
-    uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1]) if len(sys.argv) > 1 else 8010)
+    uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1]) if len(sys.argv) > 1 else 8010,
+                proxy_headers=False)

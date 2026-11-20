@@ -115,17 +115,24 @@ query endpoint return 503.
 |---|---|---|---|
 | `POST` | `/api/v1/query` | `X-API-Key` | Answer a question |
 | `GET` | `/metadata` | `X-API-Key` | Model names, artifact versions, retrieval mode, rerank depth |
+| `GET` | `/metrics` | `X-API-Key` | Prometheus metrics (see [Operations](#operations)) |
 | `GET` | `/health` | open | Liveness |
 | `GET` | `/ready` | open | 200 when the configured artifacts, `GROQ_API_KEY` and API keys are present, else 503 |
+| `GET` | `/docs`, `/openapi.json` | open | Swagger UI and the OpenAPI schema |
 
-**Authentication:** send one of the keys in `API_KEYS` (comma-separated) in the `X-API-Key`
-header. Keys are compared in constant time against every configured key. A missing or wrong
-key gets 401. With no keys configured, every protected request gets 401 (fail closed). Auth is
-off only when `AUTH_DISABLED=true`, which logs a warning at startup and is meant for local
-development only.
+**Authentication is the default for every path.** Only `/health`, `/ready`, `/docs` and
+`/openapi.json` are open, from an explicit allowlist in the outermost middleware
+([`app/middleware.py`](app/middleware.py)). Any other path, including routes added later, needs
+one of the keys in `API_KEYS` (comma-separated) in the `X-API-Key` header.
+- Keys are compared in constant time against every configured key.
+- A missing or wrong key gets 401.
+- With no keys configured, every protected request gets 401 (fail closed).
+- Auth is off only when `AUTH_DISABLED=true`, which logs a warning at startup and is meant for
+  local development only.
 
-Request body: `query` (string, 1–2,000 characters) and optional `top_k` (integer 1–20,
-default `RERANK_TOP_K`, the number of passages sent to the LLM and returned as citations).
+Request body: `query` (string, 1 to `MAX_QUERY_CHARS` characters, default 2,000; longer gets
+422) and optional `top_k` (integer 1–20, default 5, the number of passages sent to the LLM and
+returned as citations).
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
@@ -140,13 +147,17 @@ Response shape:
 {
   "answer": "…",
   "citations": [{"passage_id": 123, "passage_text": "…", "score": 8.75}],
-  "latency_ms": 812.4
+  "latency_ms": 812.4,
+  "error": null
 }
 ```
 
-Errors: 400 invalid query, 401 missing or invalid API key, 422 validation error, 429 rate
-limited, 500 unexpected pipeline
-error, 502 LLM failure, 503 artifacts missing or failing verification.
+If the LLM still fails after its retries, the response is **200 with the reranked passages**,
+`"answer": null` and `"error": "generation_failed"`, not a 5xx.
+
+Errors: 400 invalid query, 401 missing or invalid API key, 422 validation error (including a
+query over `MAX_QUERY_CHARS`), 429 rate limited (`Retry-After: 60`), 500 unexpected pipeline
+error, 502 unexpected non-LLM runtime failure, 503 artifacts missing or failing verification.
 
 ## Quick start (Docker Compose)
 
@@ -182,7 +193,7 @@ source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 python scripts/fetch_artifacts.py
 cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
 ### Build corpus v3 from source instead
@@ -240,7 +251,8 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `AUTH_DISABLED` | `false` | `true` turns API-key auth off (local development only; logs a warning) |
 | `API_PORT` | `8000` | Docker Compose host port (the container always listens on 8000) |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | LLM for the final answer |
-| `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `30` / `2` | LLM timeout and retries on transient errors |
+| `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `10` / `2` | Per-attempt LLM timeout; retries on timeouts, 429 and 5xx only (backoff 0.2 s, 0.4 s, …) |
+| `GENERATION_DEADLINE_SECONDS` | `20` | Total budget for all LLM attempts and backoff; then the passages are returned with `answer: null` |
 | `EMBEDDING_MODEL` / `EMBEDDING_MODEL_REVISION` | `sentence-transformers/all-MiniLM-L6-v2` @ `1110a243…` | Dense encoder (pinned commit) |
 | `RERANKER_MODEL` / `RERANKER_MODEL_REVISION` | `cross-encoder/ms-marco-MiniLM-L-6-v2` @ `233902d2…` | Cross-encoder (pinned commit) |
 | `RETRIEVAL_MODE` | `dense` | `dense` or `hybrid` |
@@ -252,7 +264,8 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `MANIFEST_PATH`, `PASSAGES_PATH`, `DENSE_INDEX_PATH`, `BM25_INDEX_PATH`, `BM25_CORPUS_PATH` | `artifacts/v3/…` | Artifact locations; BM25 files are needed only in hybrid mode |
 | `INDEX_VERSION` / `DATA_VERSION` | `v3` | Reported by `/metadata` |
 | `APPLICATION_VERSION` / `GIT_VERSION` | `1.0.0` / `unknown` | Reported by `/metadata` |
-| `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW_SECONDS` | `60` / `60` | Per-client-IP limit, in-process |
+| `RATE_LIMIT_PER_MIN` | `60` | Requests per minute per API key (per client IP when unauthenticated); `0` disables |
+| `MAX_QUERY_CHARS` | `2000` | Longest accepted `query`; longer gets 422 |
 | `TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Allowed `Host` headers |
 | `CORS_ORIGINS` | empty | Allowed browser origins (empty = none) |
 
@@ -279,6 +292,68 @@ CI runs lint, the tests, a lockfile-drift check, a security audit (below), a Doc
 an offline model-load check and a container smoke test. Dependencies are pinned in
 `requirements.txt` / `requirements-dev.txt` and hash-locked for Linux in `requirements*.lock`
 (regenerate with `scripts/lock_deps.sh`).
+
+## Operations
+
+**Probes.**
+- `/health`: liveness. Always 200 while the process serves.
+- `/ready`: readiness. 200 only when the artifacts, `GROQ_API_KEY` and (with auth on) at least
+  one API key are configured. Neither probe needs a key or counts against the rate limit.
+
+**Logs.** One JSON object per line on stdout, with `timestamp`, `level`, `logger`, `message`,
+`request_id` and `key_id`, plus context fields such as `method`, `path`, `status_code`,
+`latency_ms`, `stage`, `stage_ms` and `error_type`.
+- **`request_id`:** taken from the `X-Request-ID` request header if it matches
+  `[A-Za-z0-9._:-]{1,64}`, otherwise generated. It is returned in the `X-Request-ID` response
+  header and stamped on every log line of that request.
+- **`key_id`:** `sha256(API key)[:8]` for authenticated requests, `-` otherwise. The raw key is
+  never logged; a test checks this for both valid and invalid keys.
+
+Example:
+
+```json
+{"timestamp":"…","level":"INFO","logger":"app.middleware","message":"request_complete","request_id":"req-abc-123","key_id":"1a2b3c4d","method":"POST","path":"/api/v1/query","status_code":200,"latency_ms":812.4}
+```
+
+**Metrics** (`GET /metrics`, Prometheus text format, requires `X-API-Key`):
+
+| Metric | Type | Labels |
+|---|---|---|
+| `rag_stage_latency_seconds` | histogram | `stage` = `retrieve`, `rerank`, `generate` |
+| `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `service_unavailable`, `invalid_request`, `generation_failed`, `pipeline_error` |
+| `http_requests_total` | counter | `status` |
+
+**Rate limit.** Sliding 60-second window, `RATE_LIMIT_PER_MIN` requests per API key.
+Unauthenticated requests are limited per client IP, which also slows down key guessing. Over
+the limit gets 429 with `Retry-After: 60`. The removed settings `RATE_LIMIT_REQUESTS` and
+`RATE_LIMIT_WINDOW_SECONDS` are ignored; if either is set (environment or `.env`), startup
+logs a warning naming `RATE_LIMIT_PER_MIN`.
+
+**Client IP and `X-Forwarded-For`.** The per-IP bucket uses `request.client.host`, the TCP
+peer, and never reads `X-Forwarded-For`. uvicorn's default proxy-header handling would
+otherwise replace `request.client.host` with a client-supplied `X-Forwarded-For` for
+connections from 127.0.0.1. So every launch here disables it (`--no-proxy-headers` in the
+Dockerfile and the README command, `proxy_headers=False` in `scripts/manual/serve_no_llm.py`).
+A test checks that a spoofed `X-Forwarded-For` doesn't reset the limit, both in-process and
+through uvicorn. Behind a trusted reverse proxy, every client then shares the proxy's IP
+bucket. To limit per real client, enable proxy headers only with `FORWARDED_ALLOW_IPS` set to
+the proxy's address.
+
+**LLM timeouts and fallback.**
+- Each Groq attempt has a `GROQ_TIMEOUT_SECONDS` timeout (default 10).
+- **Only timeouts, 429 and 5xx are retried**, up to `GROQ_MAX_RETRIES` (default 2) times, with
+  exponential backoff (0.2 s, 0.4 s). Other 4xx and non-timeout errors fail immediately.
+- All attempts and sleeps share a `GENERATION_DEADLINE_SECONDS` budget (default 20). Each
+  attempt's timeout is capped by the time left, and no attempt or backoff starts past the
+  deadline, so the worst case is about 20 s.
+- If generation still fails, the API returns the reranked passages with `answer: null`,
+  `error: "generation_failed"`, and increments `rag_errors_total{type="generation_failed"}`.
+
+**Scaling: the limiter is in-memory, per process.** Each uvicorn worker and each container
+keeps its own counters. With N workers or instances, a key can make up to N ×
+`RATE_LIMIT_PER_MIN` requests per minute. Multi-worker or multi-instance deployments need a
+shared store such as **Redis** for the limiter. Metrics are also per process, so each
+worker/instance must be scraped separately (or use the Prometheus client's multiprocess mode).
 
 ## Security
 
@@ -311,8 +386,9 @@ Other measures:
   results.
 - Hard negatives come from BM25 candidate pools, so the eval leans against BM25 and hybrid.
 - Latency was measured on one laptop CPU; there is no GPU path and no concurrency benchmark.
-- The rate limiter is in-process and keyed on client IP, so it does not coordinate across
-  workers or see real client IPs behind a proxy.
+- The rate limiter is in-memory and per process; multi-worker or multi-instance deployments
+  need Redis (or similar) to share it. Unauthenticated requests are keyed on the TCP peer, so
+  behind a proxy they share one bucket.
 - Answers depend on an external LLM API. The prompt restricts the model to the retrieved
   passages, but there is no automatic faithfulness check.
 

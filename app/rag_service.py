@@ -3,6 +3,7 @@ from time import perf_counter
 from typing import Protocol
 
 from app.generation.groq_generator import GroqGenerator
+from app.metrics import ERRORS, STAGE_LATENCY
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
 
 logger = getLogger(__name__)
@@ -63,19 +64,12 @@ class RAGService:
 
         started_at = perf_counter()
 
-        retrieval_started_at = perf_counter()
+        stage_started_at = perf_counter()
         candidates = self.retriever.retrieve(
             query=query,
             top_k=self.rerank_depth,
         )
-        logger.info(
-            "retrieval_complete",
-            extra={
-                "stage": "retrieval",
-                "stage_ms": _elapsed_ms(retrieval_started_at),
-                "result_count": len(candidates),
-            },
-        )
+        _record_stage("retrieve", stage_started_at, len(candidates))
 
         if not candidates:
             return {
@@ -87,20 +81,13 @@ class RAGService:
                 "latency_ms": _elapsed_ms(started_at),
             }
 
-        rerank_started_at = perf_counter()
+        stage_started_at = perf_counter()
         reranked_results = self.reranker.rerank(
             query=query,
             passages=candidates,
             top_k=final_top_k,
         )
-        logger.info(
-            "reranking_complete",
-            extra={
-                "stage": "reranking",
-                "stage_ms": _elapsed_ms(rerank_started_at),
-                "result_count": len(reranked_results),
-            },
-        )
+        _record_stage("rerank", stage_started_at, len(reranked_results))
 
         if not reranked_results:
             return {
@@ -112,18 +99,29 @@ class RAGService:
                 "latency_ms": _elapsed_ms(started_at),
             }
 
-        generation_started_at = perf_counter()
-        answer = self.generator.generate(
-            query=query,
-            passages=reranked_results,
-        )
-        logger.info(
-            "generation_complete",
-            extra={
-                "stage": "generation",
-                "stage_ms": _elapsed_ms(generation_started_at),
-            },
-        )
+        stage_started_at = perf_counter()
+        try:
+            answer = self.generator.generate(
+                query=query,
+                passages=reranked_results,
+            )
+        except RuntimeError as exc:
+            # The generator raises RuntimeError after its bounded retries
+            # (timeouts, connection errors, 429/5xx) or on an empty reply.
+            # Degrade: return the passages without an answer instead of 5xx.
+            _record_stage("generate", stage_started_at)
+            ERRORS.labels(type="generation_failed").inc()
+            logger.warning(
+                "generation_failed",
+                extra={"error_type": type(exc.__cause__ or exc).__name__},
+            )
+            return {
+                "answer": None,
+                "error": "generation_failed",
+                "citations": reranked_results,
+                "latency_ms": _elapsed_ms(started_at),
+            }
+        _record_stage("generate", stage_started_at)
 
         return {
             "answer": answer,
@@ -134,3 +132,12 @@ class RAGService:
 
 def _elapsed_ms(started_at: float) -> float:
     return round((perf_counter() - started_at) * 1000, 2)
+
+
+def _record_stage(stage: str, started_at: float, result_count: int | None = None) -> None:
+    elapsed = perf_counter() - started_at
+    STAGE_LATENCY.labels(stage=stage).observe(elapsed)
+    extra = {"stage": stage, "stage_ms": round(elapsed * 1000, 2)}
+    if result_count is not None:
+        extra["result_count"] = result_count
+    logger.info(f"{stage}_complete", extra=extra)

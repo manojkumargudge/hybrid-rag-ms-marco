@@ -3,22 +3,18 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
 from app.artifacts import verify_artifacts
-from app.auth import (
-    API_KEY_HEADER,
-    configured_keys,
-    log_auth_configuration,
-    require_api_key,
-)
-from app.config import settings
+from app.auth import API_KEY_HEADER, configured_keys, log_auth_configuration
+from app.config import settings, warn_legacy_settings
 from app.generation.groq_generator import GroqGenerator
-from app.middleware import ProductionMiddleware, request_id_context
+from app.metrics import render as render_metrics
+from app.middleware import ProductionMiddleware, key_id_context, request_id_context
 from app.rag_service import RAGService
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
 from app.retrieval.bm25_retriever import BM25Retriever
@@ -33,7 +29,11 @@ class _JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
-            "request_id": getattr(record, "request_id", request_id_context.get()),
+            # Captured when the record is created (see _configure_logging), so
+            # they stay correct even if formatting happens later.
+            "request_id": getattr(record, "request_id", "-"),
+            # key_id = sha256(API key)[:8]; the raw key is never logged.
+            "key_id": getattr(record, "key_id", "-"),
         }
         for field in (
             "method",
@@ -50,7 +50,24 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(payload, separators=(",", ":"))
 
 
+def _install_context_record_factory() -> None:
+    """Stamp request_id and key_id onto every log record at creation time."""
+    base_factory = logging.getLogRecordFactory()
+    if getattr(base_factory, "_adds_request_context", False):
+        return
+
+    def factory(*args, **kwargs):
+        record = base_factory(*args, **kwargs)
+        record.request_id = request_id_context.get()
+        record.key_id = key_id_context.get()
+        return record
+
+    factory._adds_request_context = True
+    logging.setLogRecordFactory(factory)
+
+
 def _configure_logging() -> None:
+    _install_context_record_factory()
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     if not root_logger.handlers:
@@ -61,6 +78,7 @@ def _configure_logging() -> None:
 
 _configure_logging()
 log_auth_configuration()
+warn_legacy_settings()
 
 
 def create_rag_service() -> RAGService:
@@ -122,6 +140,10 @@ app = FastAPI(
         "reranking, and Groq-hosted LLM generation."
     ),
     version="1.0.0",
+    # Only /docs and /openapi.json are on the open allowlist; ReDoc and the
+    # OAuth2 redirect page are not needed.
+    redoc_url=None,
+    swagger_ui_oauth2_redirect_url=None,
 )
 
 app.add_middleware(
@@ -143,11 +165,9 @@ app.add_middleware(
         if host.strip()
     ],
 )
-app.add_middleware(
-    ProductionMiddleware,
-    max_requests=settings.rate_limit_requests,
-    window_seconds=settings.rate_limit_window_seconds,
-)
+# Outermost: request id, auth for every non-allowlisted path, per-key rate
+# limit, access log (see app/middleware.py).
+app.add_middleware(ProductionMiddleware)
 
 
 def get_rag_service() -> RAGService:
@@ -172,7 +192,15 @@ def health_check() -> dict:
     }
 
 
-@app.get("/metadata", dependencies=[Depends(require_api_key)])
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    """Prometheus metrics (requires an API key like every non-allowlisted path)."""
+
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
+
+
+@app.get("/metadata")
 def metadata() -> dict:
     """Return non-sensitive model, artifact, and application versions."""
 

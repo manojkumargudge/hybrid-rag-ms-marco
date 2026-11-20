@@ -1,3 +1,11 @@
+"""Outermost middleware: request id, API-key auth by default, per-key rate limit.
+
+Every path requires a valid X-API-Key unless it is in OPEN_PATHS, so a newly
+added route is protected without any per-route code. The raw key is never
+logged; requests are identified by key_id = sha256(key)[:8].
+"""
+
+import hashlib
 import re
 import time
 import uuid
@@ -10,71 +18,115 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.auth import API_KEY_HEADER, configured_keys, is_valid_key
+from app.config import settings
+from app.metrics import ERRORS, REQUESTS
+
 request_id_context: ContextVar[str] = ContextVar("request_id", default="-")
+key_id_context: ContextVar[str] = ContextVar("key_id", default="-")
 logger = getLogger(__name__)
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
+# The only paths reachable without an API key.
+OPEN_PATHS = frozenset({"/health", "/ready", "/docs", "/openapi.json"})
+# Probes are never rate limited.
+RATE_LIMIT_EXEMPT = frozenset({"/health", "/ready"})
+RATE_LIMIT_WINDOW_SECONDS = 60
+
+
+def key_id_for(key: str) -> str:
+    """Stable, non-reversible identifier for logs and rate limiting."""
+    return hashlib.sha256(key.encode()).hexdigest()[:8]
+
+
+class RateLimiter:
+    """Sliding-window limiter, in-process (per worker)."""
+
+    def __init__(self, window_seconds: int = RATE_LIMIT_WINDOW_SECONDS) -> None:
+        self.window_seconds = window_seconds
+        self._hits: dict[str, deque[float]] = {}
+
+    def allow(self, bucket: str, limit: int) -> bool:
+        now = time.monotonic()
+        hits = self._hits.setdefault(bucket, deque())
+        cutoff = now - self.window_seconds
+        while hits and hits[0] <= cutoff:
+            hits.popleft()
+        if len(hits) >= limit:
+            return False
+        hits.append(now)
+        return True
+
+    def reset(self) -> None:
+        self._hits.clear()
+
+
+rate_limiter = RateLimiter()
+
+
+def _json_error(status_code: int, detail: str, headers: dict | None = None) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"detail": detail}, headers=headers)
+
 
 class ProductionMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, max_requests: int, window_seconds: int) -> None:
-        super().__init__(app)
-        self.max_requests = max_requests
-        self.window_seconds = window_seconds
-        self._requests: dict[str, deque[float]] = {}
-
     async def dispatch(self, request: Request, call_next) -> Response:
         supplied_id = request.headers.get("X-Request-ID", "")
         request_id = (
-            supplied_id
-            if _REQUEST_ID_PATTERN.fullmatch(supplied_id)
-            else uuid.uuid4().hex
+            supplied_id if _REQUEST_ID_PATTERN.fullmatch(supplied_id) else uuid.uuid4().hex
         )
-        token = request_id_context.set(request_id)
+        request_token = request_id_context.set(request_id)
+        key_token = key_id_context.set("-")
         started_at = time.perf_counter()
         status_code = 500
+        key_id = "-"
+        path = request.url.path
 
         try:
-            if self._rate_limited(request):
-                status_code = 429
-                response = JSONResponse(
-                    status_code=status_code,
-                    content={"detail": "Rate limit exceeded."},
-                    headers={"Retry-After": str(self.window_seconds)},
-                )
-            else:
-                response = await call_next(request)
-                status_code = response.status_code
+            auth_required = (
+                not settings.auth_disabled
+                and request.method != "OPTIONS"  # CORS preflight carries no key
+                and path not in OPEN_PATHS
+            )
+            provided = request.headers.get(API_KEY_HEADER)
+            authenticated = is_valid_key(provided, configured_keys())
+            if authenticated:
+                key_id = key_id_for(provided)
+                # Every log line of this request (incl. the access log) carries it.
+                key_id_context.set(key_id)
 
+            response = None
+            if settings.rate_limit_per_min > 0 and path not in RATE_LIMIT_EXEMPT:
+                client_host = request.client.host if request.client else "unknown"
+                bucket = f"key:{key_id}" if authenticated else f"ip:{client_host}"
+                if not rate_limiter.allow(bucket, settings.rate_limit_per_min):
+                    ERRORS.labels(type="rate_limited").inc()
+                    response = _json_error(
+                        429, "Rate limit exceeded.",
+                        {"Retry-After": str(RATE_LIMIT_WINDOW_SECONDS)},
+                    )
+
+            if response is None and auth_required and not authenticated:
+                ERRORS.labels(type="unauthorized").inc()
+                response = _json_error(
+                    401, "Invalid or missing API key.", {"WWW-Authenticate": "ApiKey"}
+                )
+
+            if response is None:
+                response = await call_next(request)
+
+            status_code = response.status_code
             response.headers["X-Request-ID"] = request_id
             return response
         finally:
+            REQUESTS.labels(status=str(status_code)).inc()
             logger.info(
                 "request_complete",
                 extra={
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": path,
                     "status_code": status_code,
-                    "latency_ms": round(
-                        (time.perf_counter() - started_at) * 1000,
-                        2,
-                    ),
+                    "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
                 },
             )
-            request_id_context.reset(token)
-
-    def _rate_limited(self, request: Request) -> bool:
-        if self.max_requests <= 0 or request.url.path in {"/health", "/ready"}:
-            return False
-
-        client_host = request.client.host if request.client else "unknown"
-        now = time.monotonic()
-        requests = self._requests.setdefault(client_host, deque())
-        cutoff = now - self.window_seconds
-        while requests and requests[0] <= cutoff:
-            requests.popleft()
-
-        if len(requests) >= self.max_requests:
-            return True
-
-        requests.append(now)
-        return False
+            key_id_context.reset(key_token)
+            request_id_context.reset(request_token)
