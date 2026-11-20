@@ -57,7 +57,7 @@ _configure_logging()
 
 
 def create_rag_service() -> RAGService:
-    """Initialize the complete Hybrid RAG pipeline."""
+    """Initialize the RAG pipeline for the configured retrieval mode."""
 
     # Served corpus must be exactly the evaluated one (BM25 pickles are
     # verified inside BM25Retriever before unpickling).
@@ -67,25 +67,27 @@ def create_rag_service() -> RAGService:
         settings.dense_index_path,
     )
 
-    dense_retriever = DenseRetriever(
+    retriever = DenseRetriever(
         index_path=settings.dense_index_path,
         passages_path=settings.passages_path,
         model_name=settings.embedding_model,
         model_revision=settings.embedding_model_revision,
     )
 
-    bm25_retriever = BM25Retriever(
-        index_path=settings.bm25_index_path,
-        corpus_path=settings.bm25_corpus_path,
-        passages_path=settings.passages_path,
-        manifest_path=settings.manifest_path,
-    )
-
-    hybrid_retriever = HybridRetriever(
-        dense_retriever=dense_retriever,
-        bm25_retriever=bm25_retriever,
-        rrf_k=settings.rrf_k,
-    )
+    if settings.retrieval_mode == "hybrid":
+        bm25_retriever = BM25Retriever(
+            index_path=settings.bm25_index_path,
+            corpus_path=settings.bm25_corpus_path,
+            passages_path=settings.passages_path,
+            manifest_path=settings.manifest_path,
+        )
+        retriever = HybridRetriever(
+            dense_retriever=retriever,
+            bm25_retriever=bm25_retriever,
+            rrf_k=settings.rrf_k,
+            dense_weight=settings.hybrid_dense_weight,
+            retrieval_k=settings.retrieval_k,
+        )
 
     reranker = CrossEncoderReranker(
         model_name=settings.reranker_model,
@@ -97,11 +99,10 @@ def create_rag_service() -> RAGService:
     )
 
     return RAGService(
-        hybrid_retriever=hybrid_retriever,
+        retriever=retriever,
         reranker=reranker,
         generator=generator,
-        retrieval_k=settings.retrieval_k,
-        hybrid_top_k=settings.hybrid_top_k,
+        rerank_depth=settings.rerank_depth,
         rerank_top_k=settings.rerank_top_k,
     )
 
@@ -109,9 +110,9 @@ def create_rag_service() -> RAGService:
 app = FastAPI(
     title="Hybrid RAG over MS MARCO",
     description=(
-        "Production-oriented hybrid retrieval-augmented generation "
-        "system using Dense Retrieval, BM25, RRF, Cross-Encoder "
-        "Reranking, and Groq-hosted LLM generation."
+        "Retrieval-augmented generation over an MS MARCO passage subset: "
+        "dense retrieval (or hybrid dense + BM25 with RRF), cross-encoder "
+        "reranking, and Groq-hosted LLM generation."
     ),
     version="1.0.0",
 )
@@ -176,6 +177,8 @@ def metadata() -> dict:
         "reranker_model": settings.reranker_model,
         "index_version": settings.index_version,
         "data_version": settings.data_version,
+        "retrieval_mode": settings.retrieval_mode,
+        "rerank_depth": settings.rerank_depth,
     }
 
 
@@ -187,9 +190,10 @@ def readiness_check() -> JSONResponse:
         "manifest": settings.manifest_path,
         "passages": settings.passages_path,
         "dense_index": settings.dense_index_path,
-        "bm25_index": settings.bm25_index_path,
-        "bm25_corpus": settings.bm25_corpus_path,
     }
+    if settings.retrieval_mode == "hybrid":
+        required_paths["bm25_index"] = settings.bm25_index_path
+        required_paths["bm25_corpus"] = settings.bm25_corpus_path
     missing = [
         name
         for name, path in required_paths.items()

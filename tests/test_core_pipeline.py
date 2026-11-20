@@ -40,21 +40,73 @@ def test_reranker_sorts_by_cross_encoder_score():
     assert [item["passage_id"] for item in results] == [2]
 
 
-def test_rag_service_forwards_top_k_and_returns_latency():
-    hybrid = Mock()
-    hybrid.retrieve.return_value = [passage(1), passage(2)]
-    reranker = Mock()
+def _service(rerank_depth=20, rerank_top_k=5, candidates=None):
+    retriever, reranker, generator = Mock(), Mock(), Mock()
+    retriever.retrieve.return_value = (
+        [passage(1), passage(2)] if candidates is None else candidates
+    )
     reranker.rerank.return_value = [passage(2)]
-    generator = Mock()
     generator.generate.return_value = "grounded answer"
-    service = RAGService(hybrid, reranker, generator)
+    service = RAGService(retriever, reranker, generator,
+                         rerank_depth=rerank_depth, rerank_top_k=rerank_top_k)
+    return service, retriever, reranker, generator
+
+
+def test_rag_service_forwards_top_k_and_returns_latency():
+    service, retriever, reranker, generator = _service()
 
     result = service.answer("query", top_k=1)
 
-    reranker.rerank.assert_called_once_with(query="query", passages=hybrid.retrieve.return_value, top_k=1)
+    retriever.retrieve.assert_called_once_with(query="query", top_k=20)
+    reranker.rerank.assert_called_once_with(
+        query="query", passages=retriever.retrieve.return_value, top_k=1
+    )
+    generator.generate.assert_called_once_with(query="query", passages=[passage(2)])
     assert result["answer"] == "grounded answer"
     assert result["citations"] == [passage(2)]
     assert result["latency_ms"] >= 0
+
+
+def test_rag_service_retrieves_rerank_depth_and_defaults_to_rerank_top_k():
+    service, retriever, reranker, _ = _service(rerank_depth=50, rerank_top_k=3)
+
+    service.answer("query")
+
+    retriever.retrieve.assert_called_once_with(query="query", top_k=50)
+    assert reranker.rerank.call_args.kwargs["top_k"] == 3
+
+
+def test_rag_service_skips_rerank_and_generation_without_candidates():
+    service, _, reranker, generator = _service(candidates=[])
+
+    result = service.answer("query")
+
+    assert result["citations"] == []
+    reranker.rerank.assert_not_called()
+    generator.generate.assert_not_called()
+
+
+@pytest.mark.parametrize("kwargs", [{"rerank_depth": 0}, {"rerank_top_k": 0}])
+def test_rag_service_rejects_non_positive_depths(kwargs):
+    with pytest.raises(ValueError):
+        RAGService(Mock(), Mock(), Mock(), **kwargs)
+
+
+def test_hybrid_uses_constructor_retrieval_k_by_default():
+    dense, bm25 = Mock(), Mock()
+    dense.retrieve.return_value = _ranked([1, 2])
+    bm25.retrieve.return_value = _ranked([2, 3])
+
+    HybridRetriever(dense, bm25, retrieval_k=7).retrieve("q", top_k=3)
+    dense.retrieve.assert_called_once_with(query="q", top_k=7)
+    bm25.retrieve.assert_called_once_with(query="q", top_k=7)
+
+    dense.reset_mock()
+    HybridRetriever(dense, bm25, retrieval_k=7).retrieve("q", top_k=3, retrieval_k=4)
+    dense.retrieve.assert_called_once_with(query="q", top_k=4)
+
+    with pytest.raises(ValueError):
+        HybridRetriever(dense, bm25, retrieval_k=0)
 
 
 def test_rag_service_rejects_empty_query():
@@ -74,3 +126,29 @@ def test_rag_service_rejects_non_positive_top_k():
 def test_repair_mojibake_preserves_valid_text():
     assert repair_mojibake("chÃ¢teaux") == "châteaux"
     assert repair_mojibake("plain text") == "plain text"
+
+
+def _ranked(ids):
+    return [{"passage_id": i, "passage_text": str(i), "score": 0.0} for i in ids]
+
+
+def test_weighted_rrf_half_weight_equals_standard_rrf():
+    dense, bm25 = Mock(), Mock()
+    dense.retrieve.return_value = _ranked([1, 2, 3])
+    bm25.retrieve.return_value = _ranked([3, 4, 1])
+    standard = HybridRetriever(dense, bm25, rrf_k=60).retrieve("q", top_k=4)
+    weighted = HybridRetriever(dense, bm25, rrf_k=60, dense_weight=0.5).retrieve("q", top_k=4)
+    assert standard == weighted
+    assert standard[0]["score"] == pytest.approx(1 / 61 + 1 / 63)
+
+
+def test_weighted_rrf_extremes_follow_one_retriever():
+    dense, bm25 = Mock(), Mock()
+    dense.retrieve.return_value = _ranked([1, 2, 3])
+    bm25.retrieve.return_value = _ranked([3, 2, 1])
+    only_dense = HybridRetriever(dense, bm25, dense_weight=1.0).retrieve("q", top_k=3)
+    only_bm25 = HybridRetriever(dense, bm25, dense_weight=0.0).retrieve("q", top_k=3)
+    assert [r["passage_id"] for r in only_dense] == [1, 2, 3]
+    assert [r["passage_id"] for r in only_bm25] == [3, 2, 1]
+    with pytest.raises(ValueError):
+        HybridRetriever(dense, bm25, dense_weight=1.5)

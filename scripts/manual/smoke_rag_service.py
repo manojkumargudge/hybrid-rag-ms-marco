@@ -1,104 +1,38 @@
-from app.generation.groq_generator import GroqGenerator
-from app.rag_service import RAGService
-from app.reranking.cross_encoder_reranker import CrossEncoderReranker
-from app.retrieval.bm25_retriever import BM25Retriever
-from app.retrieval.dense_retriever import DenseRetriever
-from app.retrieval.hybrid_retriever import HybridRetriever
+"""Manual end-to-end smoke test of the served pipeline.
 
-PASSAGES_PATH = "data/passages_subset.parquet"
+Uses the exact service the API builds (create_rag_service), so it honours
+RETRIEVAL_MODE, RERANK_DEPTH and the other settings. Needs the artifacts,
+the models, and GROQ_API_KEY (one real LLM call).
 
-DENSE_INDEX_PATH = "indices/dense_index.faiss"
+    python -m scripts.manual.smoke_rag_service ["your question"]
+"""
 
-BM25_INDEX_PATH = "indices/bm25/bm25_index.pkl"
+import sys
 
-BM25_CORPUS_PATH = "indices/bm25/tokenized_corpus.pkl"
+from app.config import settings
+from app.main import create_rag_service
 
 
 def main() -> None:
-    print("=== INITIALIZING HYBRID RAG ===")
+    # LLM answers and MS MARCO passages contain characters a Windows console
+    # code page (cp1252) cannot encode.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    query = sys.argv[1] if len(sys.argv) > 1 else "what are the symptoms of diabetes?"
+    print(f"retrieval_mode={settings.retrieval_mode} rerank_depth={settings.rerank_depth} "
+          f"rerank_top_k={settings.rerank_top_k}")
 
-    print("\nLoading Dense Retriever...")
+    result = create_rag_service().answer(query)
 
-    dense_retriever = DenseRetriever(
-        index_path=DENSE_INDEX_PATH,
-        passages_path=PASSAGES_PATH,
-    )
+    print(f"\nQUERY: {query}\n\nANSWER:\n{result['answer']}\n")
+    for rank, citation in enumerate(result["citations"], start=1):
+        print(f"[{rank}] passage {citation['passage_id']} "
+              f"(score {citation['score']:.3f}): {citation['passage_text'][:200]}")
+    print(f"\nlatency_ms={result['latency_ms']}")
 
-    print("Loading BM25 Retriever...")
-
-    bm25_retriever = BM25Retriever(
-        index_path=BM25_INDEX_PATH,
-        corpus_path=BM25_CORPUS_PATH,
-        passages_path=PASSAGES_PATH,
-    )
-
-    print("Creating Hybrid Retriever...")
-
-    hybrid_retriever = HybridRetriever(
-        dense_retriever=dense_retriever,
-        bm25_retriever=bm25_retriever,
-        rrf_k=60,
-    )
-
-    print("Loading Cross-Encoder Reranker...")
-
-    reranker = CrossEncoderReranker()
-
-    print("Loading Groq Generator...")
-
-    generator = GroqGenerator()
-
-    print("Creating RAG Service...")
-
-    rag = RAGService(
-        hybrid_retriever=hybrid_retriever,
-        reranker=reranker,
-        generator=generator,
-        retrieval_k=20,
-        hybrid_top_k=10,
-        rerank_top_k=5,
-    )
-
-    query = "what are the symptoms of diabetes?"
-
-    print("\n" + "=" * 60)
-    print(f"QUERY: {query}")
-    print("=" * 60)
-
-    print("\nRunning complete RAG pipeline...")
-
-    result = rag.answer(query)
-
-    print("\n=== FINAL ANSWER ===")
-    print(result["answer"])
-
-    print("\n=== SOURCES ===")
-
-    for rank, source in enumerate(result["sources"], start=1):
-        print(f"\nSource {rank}")
-        print(f"Passage ID: {source['passage_id']}")
-        print(f"Score: {source['score']:.6f}")
-        print(f"Text: {source['passage_text'][:250]}...")
-
-    print("\n=== VERIFICATION ===")
-
-    assert result["query"] == query
-    assert result["answer"]
-    assert isinstance(result["answer"], str)
-    assert len(result["sources"]) == 5
-
-    source_ids = [
-        source["passage_id"]
-        for source in result["sources"]
-    ]
-
-    assert len(source_ids) == len(set(source_ids))
-
-    print("✓ Query processed successfully")
-    print("✓ Final answer generated")
-    print("✓ Exactly 5 sources returned")
-    print("✓ No duplicate source IDs")
-    print("✓ END-TO-END RAG PIPELINE WORKING")
+    ids = [c["passage_id"] for c in result["citations"]]
+    assert result["answer"], "empty answer"
+    assert len(ids) == len(set(ids)), "duplicate citations"
+    assert len(ids) <= settings.rerank_top_k
 
 
 if __name__ == "__main__":

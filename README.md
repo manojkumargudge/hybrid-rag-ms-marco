@@ -218,10 +218,12 @@ All settings come from environment variables (see `.env.example`).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `RETRIEVAL_K` | `20` | Candidates fetched from each retriever |
-| `HYBRID_TOP_K` | `10` | Candidates kept after RRF |
+| `RETRIEVAL_MODE` | `dense` | `dense` (default, chosen on the tune split) or `hybrid` (dense + BM25 with RRF) |
+| `RERANK_DEPTH` | `20` | Candidates from the retriever that the cross-encoder reranks |
 | `RERANK_TOP_K` | `5` | Passages sent to the LLM |
-| `RRF_K` | `60` | RRF smoothing constant |
+| `RETRIEVAL_K` | `20` | Hybrid only: candidates fetched from each retriever before RRF |
+| `RRF_K` | `60` | Hybrid only: RRF smoothing constant |
+| `HYBRID_DENSE_WEIGHT` | `0.5` | Hybrid only: dense weight in RRF (0.5 = standard RRF) |
 
 ### Paths and versions
 

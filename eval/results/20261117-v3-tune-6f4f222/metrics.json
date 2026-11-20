@@ -1,0 +1,699 @@
+{
+  "run": "20261117-v3-tune-6f4f222",
+  "created_at": "2026-11-17T11:03:12.045474+00:00",
+  "git": {
+    "commit": "6f4f2224adb01a54e1b75f4427b85acdace21fda",
+    "dirty": false
+  },
+  "split": "tune (official MS MARCO dev-small qrels); eval split not read",
+  "n_queries": 500,
+  "corpus": {
+    "version": "v3",
+    "manifest_sha256": "3ab42d5b6b586d59ecc35a39a2565a010637a4a68ce0899ee49ef1a0a8dfce82"
+  },
+  "config": {
+    "depth": 100,
+    "rrf_k": 60,
+    "weights": [
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9
+    ],
+    "rerank_depths": [
+      10,
+      20,
+      50
+    ],
+    "weighted_rrf": "2w/(k+rank_dense) + 2(1-w)/(k+rank_bm25); w=0.5 == standard RRF",
+    "embedding_model": "sentence-transformers/all-MiniLM-L6-v2@1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2@233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "bootstrap": {
+      "n_resamples": 10000,
+      "seed": 42
+    },
+    "cache_sha256": "fda1dd6bc84e72ddcbdcbf3cbd47ca1f2f33ed4c66ab385d38e2a92988742215"
+  },
+  "decision_rule": "Best config per family by mean MRR@10 on tune (ties: smaller depth, then larger w). Serve best wrrf+rerank only if it beats best dense+rerank on tune with the paired 95% bootstrap CI of the MRR@10 difference entirely above 0; else serve best dense+rerank (hybrid remains a config option).",
+  "best": {
+    "dense+rerank": "dense+rerank(depth=50)",
+    "wrrf+rerank": "wrrf+rerank(w=0.6,depth=50)"
+  },
+  "best_wrrf_minus_best_dense": {
+    "mrr@10": {
+      "mean_diff": 0.0005420634920634921,
+      "ci_low": -0.0027555555555555554,
+      "ci_high": 0.005589742063492062,
+      "p_diff_le_0": 0.4511,
+      "n_queries": 500,
+      "n_resamples": 10000
+    },
+    "recall@10": {
+      "mean_diff": -0.003,
+      "ci_low": -0.01,
+      "ci_high": 0.004,
+      "p_diff_le_0": 0.8547,
+      "n_queries": 500,
+      "n_resamples": 10000
+    },
+    "recall@100": {
+      "mean_diff": 0.002,
+      "ci_low": 0.0,
+      "ci_high": 0.006,
+      "p_diff_le_0": 0.3666,
+      "n_queries": 500,
+      "n_resamples": 10000
+    },
+    "ndcg@10": {
+      "mean_diff": -0.0004441028084806289,
+      "ci_low": -0.004521820678346521,
+      "ci_high": 0.0049582242651672916,
+      "p_diff_le_0": 0.6138,
+      "n_queries": 500,
+      "n_resamples": 10000
+    }
+  },
+  "chosen": {
+    "name": "dense+rerank(depth=50)",
+    "family": "dense+rerank",
+    "dense_weight": null,
+    "rerank_depth": 50
+  },
+  "grid": {
+    "dense+rerank(depth=10)": {
+      "family": "dense+rerank",
+      "dense_weight": null,
+      "rerank_depth": 10,
+      "mrr@10": {
+        "mean": 0.7864880952380952,
+        "ci95": [
+          0.7559649404761906,
+          0.8159599999999999
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9166666666666666,
+        "ci95": [
+          0.8926666666666666,
+          0.9393333333333332
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8155808602146428,
+        "ci95": [
+          0.7880446736257413,
+          0.8418222017060817
+        ]
+      }
+    },
+    "dense+rerank(depth=20)": {
+      "family": "dense+rerank",
+      "dense_weight": null,
+      "rerank_depth": 20,
+      "mrr@10": {
+        "mean": 0.7925452380952381,
+        "ci95": [
+          0.7622441666666667,
+          0.8214408333333333
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9353333333333332,
+        "ci95": [
+          0.9133333333333332,
+          0.955
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8246436481591284,
+        "ci95": [
+          0.7982562373460023,
+          0.849455137857427
+        ]
+      }
+    },
+    "dense+rerank(depth=50)": {
+      "family": "dense+rerank",
+      "dense_weight": null,
+      "rerank_depth": 50,
+      "mrr@10": {
+        "mean": 0.8002650793650794,
+        "ci95": [
+          0.7711946626984126,
+          0.8283119047619047
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9495,
+        "ci95": [
+          0.9295,
+          0.968
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8342007622749172,
+        "ci95": [
+          0.809161217575668,
+          0.857948996752739
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.5,depth=10)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.5,
+      "rerank_depth": 10,
+      "mrr@10": {
+        "mean": 0.7249793650793651,
+        "ci95": [
+          0.6890215476190475,
+          0.7603079761904762
+        ]
+      },
+      "recall@10": {
+        "mean": 0.8033333333333332,
+        "ci95": [
+          0.7686666666666666,
+          0.837
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.739903143757913,
+        "ci95": [
+          0.705122982403144,
+          0.7738503564585024
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.5,depth=20)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.5,
+      "rerank_depth": 20,
+      "mrr@10": {
+        "mean": 0.7694968253968254,
+        "ci95": [
+          0.7365153968253968,
+          0.8006669246031746
+        ]
+      },
+      "recall@10": {
+        "mean": 0.8863333333333333,
+        "ci95": [
+          0.858,
+          0.9133333333333332
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.7954927341360833,
+        "ci95": [
+          0.7653915000035483,
+          0.8243645951703963
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.5,depth=50)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.5,
+      "rerank_depth": 50,
+      "mrr@10": {
+        "mean": 0.7992126984126984,
+        "ci95": [
+          0.7696503174603175,
+          0.8275172222222222
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9385,
+        "ci95": [
+          0.917,
+          0.9585
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8307082648696716,
+        "ci95": [
+          0.8046060231274055,
+          0.8551805596213691
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.6,depth=10)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.6,
+      "rerank_depth": 10,
+      "mrr@10": {
+        "mean": 0.7398555555555556,
+        "ci95": [
+          0.7048888888888889,
+          0.7739001388888889
+        ]
+      },
+      "recall@10": {
+        "mean": 0.834,
+        "ci95": [
+          0.801,
+          0.865
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.7600259616190879,
+        "ci95": [
+          0.7269779820067932,
+          0.7923348139033172
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.6,depth=20)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.6,
+      "rerank_depth": 20,
+      "mrr@10": {
+        "mean": 0.7808880952380953,
+        "ci95": [
+          0.7496019642857144,
+          0.8107086904761904
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9118333333333333,
+        "ci95": [
+          0.887,
+          0.9353333333333332
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8094496844858948,
+        "ci95": [
+          0.7812092982400021,
+          0.8363102602195558
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.6,depth=50)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.6,
+      "rerank_depth": 50,
+      "mrr@10": {
+        "mean": 0.8008071428571428,
+        "ci95": [
+          0.7715702976190475,
+          0.8288714285714285
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9465,
+        "ci95": [
+          0.9265,
+          0.965
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8337566594664366,
+        "ci95": [
+          0.8083513307902457,
+          0.8574902199260854
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.7,depth=10)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.7,
+      "rerank_depth": 10,
+      "mrr@10": {
+        "mean": 0.7561492063492063,
+        "ci95": [
+          0.7225015277777778,
+          0.7887336507936509
+        ]
+      },
+      "recall@10": {
+        "mean": 0.863,
+        "ci95": [
+          0.8323333333333334,
+          0.8923333333333333
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.7795062387365753,
+        "ci95": [
+          0.7482661955267714,
+          0.8100881787911314
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.7,depth=20)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.7,
+      "rerank_depth": 20,
+      "mrr@10": {
+        "mean": 0.7895150793650794,
+        "ci95": [
+          0.7591223412698412,
+          0.8190451587301587
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9288333333333333,
+        "ci95": [
+          0.906,
+          0.9503333333333333
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8206551050775273,
+        "ci95": [
+          0.7934764909325607,
+          0.8461380183555899
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.7,depth=50)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.7,
+      "rerank_depth": 50,
+      "mrr@10": {
+        "mean": 0.7990626984126984,
+        "ci95": [
+          0.7697244642857142,
+          0.8273288095238095
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9465,
+        "ci95": [
+          0.9265,
+          0.965
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9885,
+        "ci95": [
+          0.9785,
+          0.9965
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8323874039774735,
+        "ci95": [
+          0.8068949949497061,
+          0.8564138366375147
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.8,depth=10)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.8,
+      "rerank_depth": 10,
+      "mrr@10": {
+        "mean": 0.7740992063492064,
+        "ci95": [
+          0.7422918650793651,
+          0.8048418650793652
+        ]
+      },
+      "recall@10": {
+        "mean": 0.888,
+        "ci95": [
+          0.861,
+          0.9146666666666666
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.7993282396430346,
+        "ci95": [
+          0.7700127188300895,
+          0.8276131356173367
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.8,depth=20)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.8,
+      "rerank_depth": 20,
+      "mrr@10": {
+        "mean": 0.7944730158730158,
+        "ci95": [
+          0.7645772023809524,
+          0.8235523015873015
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9355,
+        "ci95": [
+          0.9135,
+          0.956
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8265404533997567,
+        "ci95": [
+          0.8002686264013837,
+          0.8513998389739622
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.8,depth=50)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.8,
+      "rerank_depth": 50,
+      "mrr@10": {
+        "mean": 0.7990150793650794,
+        "ci95": [
+          0.7696895833333333,
+          0.8272914285714285
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9465,
+        "ci95": [
+          0.9265,
+          0.965
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8323416562699241,
+        "ci95": [
+          0.8068824753962144,
+          0.8563681209034079
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.9,depth=10)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.9,
+      "rerank_depth": 10,
+      "mrr@10": {
+        "mean": 0.7804825396825397,
+        "ci95": [
+          0.7491848611111112,
+          0.8102409722222222
+        ]
+      },
+      "recall@10": {
+        "mean": 0.909,
+        "ci95": [
+          0.8836666666666667,
+          0.9323333333333332
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8092716431811393,
+        "ci95": [
+          0.7812679364285189,
+          0.8360326610809267
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.9,depth=20)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.9,
+      "rerank_depth": 20,
+      "mrr@10": {
+        "mean": 0.794681746031746,
+        "ci95": [
+          0.7648251190476191,
+          0.8234217857142857
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9385,
+        "ci95": [
+          0.917,
+          0.958
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8275822545368987,
+        "ci95": [
+          0.8014356256823632,
+          0.8522225026277732
+        ]
+      }
+    },
+    "wrrf+rerank(w=0.9,depth=50)": {
+      "family": "wrrf+rerank",
+      "dense_weight": 0.9,
+      "rerank_depth": 50,
+      "mrr@10": {
+        "mean": 0.7997563492063491,
+        "ci95": [
+          0.7706222420634921,
+          0.8278833928571427
+        ]
+      },
+      "recall@10": {
+        "mean": 0.9485,
+        "ci95": [
+          0.9285,
+          0.967
+        ]
+      },
+      "recall@100": {
+        "mean": 0.9865,
+        "ci95": [
+          0.976,
+          0.9955
+        ]
+      },
+      "ndcg@10": {
+        "mean": 0.8334074864027446,
+        "ci95": [
+          0.8081393774482578,
+          0.8572703121579415
+        ]
+      }
+    }
+  },
+  "hardware": {
+    "platform": "Windows-10-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "logical_cpus": 12,
+    "python": "3.11.9",
+    "packages": {
+      "torch": "2.13.0",
+      "sentence-transformers": "6.0.0",
+      "faiss-cpu": "1.15.0",
+      "rank-bm25": "0.2.2",
+      "numpy": "2.4.6"
+    },
+    "execution": "single process, sequential queries, CPU only",
+    "torch_threads": 10,
+    "cpu_name": "12th Gen Intel(R) Core(TM) i5-1235U",
+    "ram_gb": 15.7
+  },
+  "timing_seconds": {
+    "cache_build": 1395.3
+  }
+}
