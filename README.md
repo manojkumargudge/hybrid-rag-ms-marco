@@ -191,7 +191,7 @@ source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 python scripts/fetch_artifacts.py
 cp .env.example .env                 # set GROQ_API_KEY and API_KEY
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers --no-access-log
 ```
 
 ### Build corpus v3 from source instead
@@ -299,8 +299,10 @@ an offline model-load check and a container smoke test. Dependencies are pinned 
 **Logs.** One JSON object per line on stdout, with `timestamp`, `level`, `logger`, `message`,
 `request_id` and `key_id`, plus context fields such as `method`, `path`, `status_code`,
 `latency_ms`, `stage`, `stage_ms` and `error_type`.
+Request logs use the matched route template for `path`, or `-` when no route was matched.
 - **`request_id`:** taken from the `X-Request-ID` request header if it matches
-  `[A-Za-z0-9._:-]{1,64}`, otherwise generated. It is returned in the `X-Request-ID` response
+  `[A-Za-z0-9._:-]{1,64}` and contains neither the supplied nor the configured API key.
+  Otherwise, the service generates the ID. It is returned in the `X-Request-ID` response
   header and stamped on every log line of that request.
 - **`key_id`:** `sha256(API key)[:8]` for authenticated requests, `-` otherwise. The raw key is
   never logged; a test checks this for both valid and invalid keys.
@@ -318,6 +320,7 @@ Example:
 | `rag_stage_latency_seconds` | histogram | `stage` = `retrieve`, `rerank`, `generate` |
 | `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `service_unavailable`, `invalid_request`, `generation_failed`, `pipeline_error` |
 | `http_requests_total` | counter | `status` |
+| `http_request_duration_seconds` | histogram | None |
 
 **Rate limit.** Sliding 60-second window, `RATE_LIMIT_PER_MIN` requests per API key.
 Unauthenticated requests are limited per client IP, which also slows down key guessing. Over

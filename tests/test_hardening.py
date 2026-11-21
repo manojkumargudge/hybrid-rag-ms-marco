@@ -197,18 +197,26 @@ def test_logs_have_request_id_and_key_id_but_never_the_raw_key(client, anon_clie
     ok = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="fine"))])
     _service_with_groq(monkeypatch, [ok])
     wrong_key = "wrong-secret-key-123"
+    query = "private-query-123"
     formatter = _JsonFormatter()
 
     with caplog.at_level(logging.INFO):
-        response = client.post("/api/v1/query", json={"query": "q"},
+        response = client.post("/api/v1/query", json={"query": query},
                                headers={"X-Request-ID": "req-abc-123"})
-        anon_client.get("/metadata", headers={"X-API-Key": wrong_key})
+        rejected_response = anon_client.get(
+            f"/{query}?query={query}",
+            headers={"X-API-Key": wrong_key, "X-Request-ID": wrong_key},
+        )
+        probe = anon_client.get("/health", headers={"X-Request-ID": TEST_API_KEY})
 
     assert response.headers["X-Request-ID"] == "req-abc-123"
+    assert rejected_response.headers["X-Request-ID"] != wrong_key
+    assert probe.headers["X-Request-ID"] != TEST_API_KEY
     lines = [formatter.format(record) for record in caplog.records]
     output = "\n".join(lines)
     assert TEST_API_KEY not in output
     assert wrong_key not in output
+    assert query not in output
 
     expected_key_id = hashlib.sha256(TEST_API_KEY.encode()).hexdigest()[:8]
     entries = [json.loads(line) for line in lines]
@@ -240,6 +248,7 @@ def test_metrics_requires_key_and_exports_stage_histograms(client, anon_client, 
     for error_type in ("unauthorized", "rate_limited", "generation_failed"):
         assert f'rag_errors_total{{type="{error_type}"}}' in text
     assert "http_requests_total" in text
+    assert "http_request_duration_seconds_count" in text
 
 
 # --- removed settings warn at startup ---------------------------------------
