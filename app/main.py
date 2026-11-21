@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,6 +73,8 @@ def _configure_logging() -> None:
     root_logger.setLevel(logging.INFO)
     # HTTPX logs full URLs at INFO.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # SDK debug logs may include provider request data.
+    logging.getLogger("groq").setLevel(logging.WARNING)
     if not root_logger.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(_JsonFormatter())
@@ -170,11 +173,19 @@ app.add_middleware(
 # Outermost: request id, auth for every non-allowlisted path, per-key rate
 # limit, access log (see app/middleware.py).
 app.add_middleware(ProductionMiddleware)
+_service_lock = Lock()
 
 
 def get_rag_service() -> RAGService:
-    if app.state.rag_service is None:
-        app.state.rag_service = create_rag_service()
+    with _service_lock:
+        if app.state.rag_service is None:
+            try:
+                app.state.rag_service = create_rag_service()
+            except Exception as exc:  # noqa: BLE001 - model loaders can raise provider-specific errors
+                logging.getLogger(__name__).warning(
+                    "rag_initialization_failed", extra={"error_type": type(exc).__name__}
+                )
+                raise RuntimeError("RAG service initialization failed.") from None
     return app.state.rag_service
 
 
@@ -241,13 +252,18 @@ def readiness_check() -> JSONResponse:
     if not configured_key():
         missing.append("api_key")
 
-    if missing:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "not_ready", "service": "hybrid-rag"},
-        )
+    if not missing:
+        try:
+            app.state.get_rag_service()
+        except RuntimeError:
+            pass
+        else:
+            return JSONResponse(
+                status_code=200,
+                content={"status": "ready", "service": "hybrid-rag"},
+            )
 
     return JSONResponse(
-        status_code=200,
-        content={"status": "ready", "service": "hybrid-rag"},
+        status_code=503,
+        content={"status": "not_ready", "service": "hybrid-rag"},
     )

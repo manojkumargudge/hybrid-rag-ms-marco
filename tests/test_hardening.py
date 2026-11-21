@@ -14,6 +14,7 @@ from groq import APIStatusError, APITimeoutError
 from app.config import settings
 from app.generation.groq_generator import GroqGenerator
 from app.main import _JsonFormatter, app
+from app.metrics import REGISTRY
 from app.middleware import OPEN_PATHS
 from app.rag_service import RAGService
 from tests.conftest import TEST_API_KEY
@@ -77,6 +78,8 @@ def test_cors_preflight_is_not_blocked_by_auth(anon_client):
 def test_rate_limit_is_per_key(anon_client, mock_service, monkeypatch):
     monkeypatch.setattr(settings, "api_key", "key-a")
     monkeypatch.setattr(settings, "rate_limit_per_min", 3)
+    labels = {"type": "rate_limited"}
+    before = REGISTRY.get_sample_value("rag_errors_total", labels)
 
     def get(key):
         return anon_client.get("/metadata", headers={"X-API-Key": key})
@@ -85,6 +88,7 @@ def test_rate_limit_is_per_key(anon_client, mock_service, monkeypatch):
     limited = get("key-a")
     assert limited.status_code == 429
     assert limited.headers["Retry-After"] == "60"
+    assert REGISTRY.get_sample_value("rag_errors_total", labels) == before + 1
     # Rotating the key starts a fresh rate-limit bucket.
     monkeypatch.setattr(settings, "api_key", "key-b")
     assert get("key-a").status_code == 401
@@ -147,6 +151,9 @@ def _timeout():
 
 
 def test_groq_timeouts_retry_twice_then_return_passages(client, monkeypatch):
+    labels = {"type": "groq_timeout"}
+    before = REGISTRY.get_sample_value("rag_errors_total", labels)
+    failures_before = REGISTRY.get_sample_value("rag_errors_total", {"type": "generation_failed"})
     created = _service_with_groq(monkeypatch, [_timeout(), _timeout(), _timeout()])
     with patch("app.generation.groq_generator.time.sleep") as sleep:
         response = client.post("/api/v1/query", json={"query": "q", "top_k": 2})
@@ -162,23 +169,29 @@ def test_groq_timeouts_retry_twice_then_return_passages(client, monkeypatch):
     assert created["max_retries"] == 0  # SDK retries off; ours are bounded
 
     metrics = client.get("/metrics").text
-    assert 'rag_errors_total{type="generation_failed"} 1.0' in metrics
+    assert f'rag_errors_total{{type="generation_failed"}} {failures_before + 1}' in metrics
+    assert f'rag_errors_total{{type="groq_timeout"}} {before + 3}' in metrics
 
 
-def test_non_transient_groq_error_is_not_retried_and_degrades(client, monkeypatch):
+def test_non_transient_groq_error_is_not_retried_and_degrades(client, monkeypatch, caplog):
+    query = "private-query-123"
+    passage_text = _passage(3)["passage_text"]
     bad_request = APIStatusError(
-        "bad request",
+        f"provider exception with {query}, {passage_text}, and test-groq-key",
         response=httpx.Response(400, request=httpx.Request("POST", "https://api.groq.test")),
         body=None,
     )
     created = _service_with_groq(monkeypatch, [bad_request])
     with patch("app.generation.groq_generator.time.sleep") as sleep:
-        response = client.post("/api/v1/query", json={"query": "q"})
+        response = client.post("/api/v1/query", json={"query": query})
 
     assert response.status_code == 200
     assert response.json()["answer"] is None
     assert created["client"].chat.completions.create.call_count == 1
     sleep.assert_not_called()
+    logs = "\n".join(_JsonFormatter().format(record) for record in caplog.records)
+    assert "generation_failed" in logs
+    assert all(value not in logs for value in (query, passage_text, "test-groq-key", TEST_API_KEY))
 
 
 def test_transient_failure_then_success_returns_answer(client, monkeypatch):
@@ -217,6 +230,7 @@ def test_logs_have_request_id_and_key_id_but_never_the_raw_key(client, anon_clie
     assert TEST_API_KEY not in output
     assert wrong_key not in output
     assert query not in output
+    assert _passage(3)["passage_text"] not in output
 
     expected_key_id = hashlib.sha256(TEST_API_KEY.encode()).hexdigest()[:8]
     entries = [json.loads(line) for line in lines]

@@ -3,6 +3,7 @@
 from groq import APIStatusError, APITimeoutError, Groq
 
 from app.config import settings
+from app.metrics import ERRORS
 
 
 class GroqGenerator:
@@ -117,6 +118,8 @@ Answer:
                 )
                 break
             except Exception as exc:
+                if isinstance(exc, (APITimeoutError, TimeoutError)):
+                    ERRORS.labels(type="groq_timeout").inc()
                 if not _is_retryable(exc) or attempt >= self.max_retries:
                     raise RuntimeError("LLM generation failed.") from exc
                 backoff = 0.2 * (2**attempt)

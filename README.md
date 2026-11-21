@@ -104,7 +104,7 @@ flowchart TD
     M -.verified before unpickling.-> H
 ```
 
-When the service first initializes, it checks the passage file and FAISS index against
+When the query service first initializes, it checks the passage file and FAISS index against
 `manifest.json`. Hybrid mode also checks both BM25 pickles before unpickling them. If a
 required file is missing or fails verification during initialization, the query endpoint
 returns 503. The initialized service is cached in each process.
@@ -117,7 +117,7 @@ returns 503. The initialized service is cached in each process.
 | `GET` | `/metadata` | `X-API-Key` | Model names, artifact versions, retrieval mode, rerank depth |
 | `GET` | `/metrics` | `X-API-Key` | Prometheus metrics (see [Operations](#operations)) |
 | `GET` | `/health` | open | Liveness |
-| `GET` | `/ready` | open | Checks that the configured artifact files and both keys are present |
+| `GET` | `/ready` | open | Checks required artifacts and initializes the configured models |
 | `GET` | `/docs`, `/openapi.json` | open | Swagger UI and the OpenAPI schema |
 
 **Authentication is the default for every path.** Only `/health`, `/ready`, `/docs` and
@@ -294,9 +294,12 @@ an offline model-load check and a container smoke test. Dependencies are pinned 
 
 **Probes.**
 - `/health` returns 200 for valid hosts while the process serves.
-- `/ready` returns 200 when the required artifact files exist and both keys are configured,
-  or 503 otherwise. It checks file presence. Artifact verification and model loading happen
-  when the query service initializes. Neither probe needs a key or counts against the rate limit.
+- `/ready` returns 200 when both keys are configured, the required files exist, and the query
+  service has initialized successfully. Initialization checks SHA-256 and loads the embedding
+  and reranker models. BM25 files are required only in hybrid mode. The first successful
+  initialization is reused by queries and later probes in that worker. A failed check returns
+  503, and subsequent probes can retry initialization. Readiness sends no Groq API request.
+  Neither probe requires client authentication or counts against the rate limit.
 
 **Logs.** The app's default logging handler writes one JSON object per line to stderr, with `timestamp`, `level`, `logger`, `message`,
 `request_id` and `key_id`, plus context fields such as `method`, `path`, `status_code`,
@@ -320,9 +323,14 @@ Example:
 | Metric | Type | Labels |
 |---|---|---|
 | `rag_stage_latency_seconds` | histogram | `stage` = `retrieve`, `rerank`, `generate` |
-| `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `service_unavailable`, `invalid_request`, `generation_failed`, `pipeline_error` |
+| `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `service_unavailable`, `invalid_request`, `generation_failed`, `groq_timeout`, `pipeline_error` |
 | `http_requests_total` | counter | `status` |
 | `http_request_duration_seconds` | histogram | None |
+
+`rag_errors_total{type="rate_limited"}` counts each request rejected by the rate limiter.
+`rag_errors_total{type="groq_timeout"}` counts each timed-out Groq attempt, including retries.
+`rag_errors_total{type="generation_failed"}` counts each query that returns passages without
+an answer due to a generation failure.
 
 **Rate limit.** Sliding 60-second window, `RATE_LIMIT_PER_MIN` requests per API key.
 Unauthenticated requests are limited per client IP, which also slows down key guessing. Over
