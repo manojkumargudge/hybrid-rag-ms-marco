@@ -1,0 +1,228 @@
+[
+  {
+    "tool": "bandit",
+    "id": "B301",
+    "scope": [
+      "app/retrieval/bm25_retriever.py",
+      "self.bm25 = pickle.load(file)"
+    ],
+    "reason": "The optional BM25 index is unpickled only after SHA-256 verification against the artifact manifest. Keep that manifest and the index in a trusted, read-only mount while the index uses pickle.",
+    "expires": "2026-12-31"
+  },
+  {
+    "tool": "bandit",
+    "id": "B301",
+    "scope": [
+      "app/retrieval/bm25_retriever.py",
+      "self.tokenized_corpus = pickle.load(file)"
+    ],
+    "reason": "The optional pretokenized BM25 corpus is unpickled only after SHA-256 verification against the artifact manifest. Keep both files in a trusted, read-only mount while the corpus uses pickle.",
+    "expires": "2026-12-31"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "curl-auth-header",
+    "scope": [
+      "README.md",
+      "bcb707322fcb2f5b8d4aee7dd899116bacee0a1e:README.md:curl-auth-header:159"
+    ],
+    "reason": "Historical localhost curl example using the documented demo API-key placeholder.",
+    "expires": "2027-02-28"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "tests/test_hardening.py",
+      "501c2db40eabfe28398101c8234825fcf14bc221:tests/test_hardening.py:generic-api-key:197"
+    ],
+    "reason": "Synthetic invalid API key used to verify log redaction in a unit test.",
+    "expires": "2027-02-28"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "eval/results/20261118-v3-0d90c58/metrics.json",
+      "5a3d00ed81795630f6ba359c118f5a6e97f1a189:eval/results/20261118-v3-0d90c58/metrics.json:generic-api-key:16"
+    ],
+    "reason": "SHA-256 digest of the BM25 tokenized corpus, stored as artifact integrity metadata.",
+    "expires": "2027-02-28"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "eval/results/20261117-v3-fd444be/metrics.json",
+      "1bf2018124436da9ae247914de4c9c8414e0fc4d:eval/results/20261117-v3-fd444be/metrics.json:generic-api-key:16"
+    ],
+    "reason": "SHA-256 digest of the BM25 tokenized corpus, stored as artifact integrity metadata.",
+    "expires": "2027-02-28"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "manifests/v2.json",
+      "84f5f8ad72a7c9f04e2264b6ee23d2ee0c5ec38c:manifests/v2.json:generic-api-key:78"
+    ],
+    "reason": "SHA-256 digest of the BM25 tokenized corpus, stored as artifact integrity metadata.",
+    "expires": "2027-02-28"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "manifests/v3.json",
+      "84f5f8ad72a7c9f04e2264b6ee23d2ee0c5ec38c:manifests/v3.json:generic-api-key:84"
+    ],
+    "reason": "SHA-256 digest of the BM25 tokenized corpus, stored as artifact integrity metadata.",
+    "expires": "2027-02-28"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2025-69720",
+    "scope": [
+      "debian",
+      "libncursesw6@6.5+20250216-2",
+      "libtinfo6@6.5+20250216-2",
+      "ncurses-base@6.5+20250216-2",
+      "ncurses-bin@6.5+20250216-2"
+    ],
+    "reason": "The Debian update is unavailable. The service exposes HTTP and does not use a terminal interface or accept terminfo data.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-119373",
+    "scope": [
+      "debian",
+      "libsqlite3-0@3.46.1-7+deb13u2"
+    ],
+    "reason": "The Debian update is unavailable. Retrieval uses FAISS and Parquet. The HTTP API does not accept SQLite databases or FTS5 inputs.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-119374",
+    "scope": [
+      "debian",
+      "libsqlite3-0@3.46.1-7+deb13u2"
+    ],
+    "reason": "The Debian update is unavailable. The HTTP API does not accept SQLite databases or indexes.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-119379",
+    "scope": [
+      "debian",
+      "libsqlite3-0@3.46.1-7+deb13u2"
+    ],
+    "reason": "The Debian update is unavailable. The HTTP API does not accept SQLite databases or changesets.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-16742",
+    "scope": [
+      "debian",
+      "libsystemd0@257.13-1~deb13u1",
+      "libudev1@257.13-1~deb13u1"
+    ],
+    "reason": "The Debian update is unavailable. The container launches Uvicorn directly without systemd-homed.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-54369",
+    "scope": [
+      "debian",
+      "libacl1@2.3.2-2+b1"
+    ],
+    "reason": "The Debian update is unavailable. The service does not manage filesystem ACLs or expose filesystem paths in its query API.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-76642",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "The Debian update is unavailable. The vulnerable util-linux mount helper is unused by the application, which runs as an unprivileged user.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-78408",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "The Debian update is unavailable. The application never invokes nsenter or migrates cgroups and runs as an unprivileged user.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-78409",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "The Debian update is unavailable. The application does not create or manipulate mounts. The deployment mounts artifacts read-only.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-78410",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "The Debian update is unavailable. The application never creates bind mounts and runs as an unprivileged user.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-9538",
+    "scope": [
+      "debian",
+      "perl-base@5.40.1-6+deb13u1"
+    ],
+    "reason": "The Debian fix is deferred. The service does not invoke Perl Archive::Tar or accept archives through its API.",
+    "expires": "2026-12-21"
+  }
+]

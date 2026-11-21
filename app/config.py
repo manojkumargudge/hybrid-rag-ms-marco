@@ -14,7 +14,7 @@ logger = getLogger(__name__)
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
-    groq_api_key: str = ""
+    groq_api_key: str = Field(default="", repr=False)
     api_key: str = Field(default="", repr=False)
     groq_model: str = "openai/gpt-oss-120b"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     # requests); 0 disables. /health and /ready are never limited.
     rate_limit_per_min: int = Field(default=60, ge=0)
     max_query_chars: int = Field(default=2000, gt=0)
+    max_query_body_bytes: int = Field(default=32768, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -71,6 +72,8 @@ settings = Settings()
 # Removed settings that are now silently ignored (extra="ignore"), mapped to
 # their replacement.
 LEGACY_SETTINGS = {
+    "AUTH_DISABLED": None,
+    "API_KEYS": None,
     "RATE_LIMIT_REQUESTS": "RATE_LIMIT_PER_MIN",
     "RATE_LIMIT_WINDOW_SECONDS": "RATE_LIMIT_PER_MIN",
 }
@@ -86,7 +89,12 @@ def legacy_settings_present(env_file: str | Path = ".env") -> list[str]:
 
 def warn_legacy_settings(env_file: str | Path = ".env") -> None:
     for name in legacy_settings_present(env_file):
-        logger.warning(
-            f"legacy_setting_ignored: {name} is no longer used; "
-            f"set {LEGACY_SETTINGS[name]} (requests per minute per API key) instead"
-        )
+        replacement = LEGACY_SETTINGS[name]
+        if replacement is None:
+            logger.warning("legacy_setting_ignored: %s is no longer used", name)
+        else:
+            logger.warning(
+                "legacy_setting_ignored: %s is no longer used; "
+                "set %s (requests per minute per API key) instead",
+                name, replacement,
+            )
