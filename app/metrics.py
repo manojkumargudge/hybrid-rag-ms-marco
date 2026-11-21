@@ -17,6 +17,7 @@ ERROR_TYPES = (
     "service_unavailable",
     "invalid_request",
     "generation_failed",
+    "groq_timeout",
     "pipeline_error",
 )
 

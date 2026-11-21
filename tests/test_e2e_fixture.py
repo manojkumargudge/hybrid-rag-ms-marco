@@ -123,8 +123,14 @@ def test_defaults_are_dense_depth_20_on_v3():
 
 
 @pytest.mark.parametrize("service", MODES, indirect=True)
-def test_ready_is_200_with_fixture_artifacts(client, service):
-    assert client.get("/ready").status_code == 200
+def test_ready_is_200_with_fixture_artifacts(anon_client, service):
+    _, groq_client, _ = service
+    assert anon_client.get("/ready").status_code == 200
+    initialized = app.state.rag_service
+    assert initialized is not None
+    assert anon_client.get("/ready").status_code == 200
+    assert app.state.rag_service is initialized
+    groq_client.chat.completions.create.assert_not_called()
 
 
 @pytest.mark.parametrize("service", MODES, indirect=True)
@@ -132,6 +138,7 @@ def test_tampered_dense_index_makes_query_503(client, service):
     out, _, _ = service
     (out / "dense_index.faiss").write_bytes(b"tampered")
 
+    assert client.get("/ready").status_code == 503
     response = client.post("/api/v1/query", json={"query": TOPICS[0]})
 
     assert response.status_code == 503
@@ -144,6 +151,7 @@ def test_tampered_bm25_only_matters_in_hybrid_mode(client, service, expected):
     out, _, _ = service
     (out / "bm25/bm25_index.pkl").write_bytes(b"tampered")
 
+    assert client.get("/ready").status_code == expected
     response = client.post("/api/v1/query", json={"query": TOPICS[0]})
 
     assert response.status_code == expected, response.text
@@ -165,6 +173,19 @@ def test_hybrid_ready_requires_bm25_files(client, service):
     out, _, _ = service
     (out / "bm25/bm25_index.pkl").unlink()
     assert client.get("/ready").status_code == 503
+
+
+@pytest.mark.parametrize("loader", [
+    "app.retrieval.dense_retriever.SentenceTransformer",
+    "app.reranking.cross_encoder_reranker.CrossEncoder",
+])
+def test_ready_rejects_unavailable_model_then_recovers(anon_client, service, loader, monkeypatch):
+    with monkeypatch.context() as unavailable:
+        unavailable.setattr(loader, Mock(side_effect=TypeError("model unavailable")))
+        assert anon_client.get("/ready").status_code == 503
+        assert app.state.rag_service is None
+
+    assert anon_client.get("/ready").status_code == 200
 
 
 def test_hybrid_dense_weight_default_and_wiring(service, monkeypatch):
