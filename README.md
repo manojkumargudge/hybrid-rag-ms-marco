@@ -1,8 +1,8 @@
 ﻿# Retrieval-augmented QA over MS MARCO
 
 A FastAPI service that answers questions from an MS MARCO passage subset. It retrieves
-candidates with a dense bi-encoder, reranks them with a cross-encoder, and has an LLM on Groq
-write an answer grounded in the top passages, returned with citations. Hybrid retrieval
+candidates with a dense bi-encoder, reranks them with a cross-encoder, and prompts an LLM on
+Groq to answer using the top passages. The API returns those passages as citations. Hybrid retrieval
 (dense + BM25 fused with reciprocal rank fusion) is available as a configuration option.
 
 ## Headline result
@@ -61,14 +61,13 @@ How to read this:
 - **Hybrid vs dense with reranking:** the served-vs-hybrid + rerank top 10 difference is
   confounded by rerank depth (20 vs 10), so it does **not** show that hybrid retrieval is worse.
   At a matched rerank depth of 50 on the tune split, weighted-RRF + rerank and dense + rerank
-  tie: MRR@10 difference +0.0005 [−0.0028, +0.0056]
+  had an MRR@10 difference of +0.0005 [−0.0028, +0.0056]
   ([`eval/results/20261117-v3-tune-c858705/metrics.json`](eval/results/20261117-v3-tune-c858705/metrics.json)).
   Hybrid stays available as `RETRIEVAL_MODE=hybrid`.
-- **The eval leans against BM25.** Every hard negative comes from the official `top1000.dev`
-  pools, which are BM25 candidates, so the distractors are exactly the passages BM25 ranks
-  highly. This hurts BM25 and, through fusion, hybrid retrieval.
+- Every hard negative in the subset was sampled from the official `top1000.dev` BM25 candidate
+  pools. The sampling method can affect comparisons between BM25, dense and hybrid retrieval.
 - **Latency** is CPU-only (Intel i5-1235U, 12 logical CPUs, 10 torch threads, 15.7 GB RAM,
-  Windows 11), queries run one at a time in a single process. In hybrid mode, dense and BM25 run
+  Windows build 26200). Queries run one at a time in a single process. In hybrid mode, dense and BM25 run
   sequentially. Generation (Groq) is not included. Per-stage p50/p95: dense 81/123 ms, BM25
   406/770 ms, rerank of 20 dense candidates 697/1,103 ms.
 - MS MARCO qrels are sparse (about one judged passage per query), so unjudged relevant passages
@@ -98,16 +97,17 @@ flowchart TD
     MODE -->|hybrid| H[Dense top RETRIEVAL_K + BM25 top RETRIEVAL_K<br/>weighted RRF fusion<br/>top RERANK_DEPTH]
     D --> R[Cross-encoder rerank<br/>ms-marco-MiniLM-L-6-v2<br/>keep top_k, default 5]
     H --> R
-    R --> G[Groq LLM<br/>prompt contains only the reranked passages]
+    R --> G[Groq LLM<br/>question + reranked passages]
     G --> A([answer + citations + latency_ms])
 
     M[(artifacts/v3<br/>manifest.json sha256)] -.verified before load.-> D
     M -.verified before unpickling.-> H
 ```
 
-Every artifact file is checked against the SHA-256 in `manifest.json` before it is loaded; the
-BM25 pickles are verified before they are unpickled. A missing or modified artifact makes the
-query endpoint return 503.
+When the service first initializes, it checks the passage file and FAISS index against
+`manifest.json`. Hybrid mode also checks both BM25 pickles before unpickling them. If a
+required file is missing or fails verification during initialization, the query endpoint
+returns 503. The initialized service is cached in each process.
 
 ## API
 
@@ -117,7 +117,7 @@ query endpoint return 503.
 | `GET` | `/metadata` | `X-API-Key` | Model names, artifact versions, retrieval mode, rerank depth |
 | `GET` | `/metrics` | `X-API-Key` | Prometheus metrics (see [Operations](#operations)) |
 | `GET` | `/health` | open | Liveness |
-| `GET` | `/ready` | open | 200 when the configured artifacts, `GROQ_API_KEY` and `API_KEY` are present, else 503 |
+| `GET` | `/ready` | open | Checks that the configured artifact files and both keys are present |
 | `GET` | `/docs`, `/openapi.json` | open | Swagger UI and the OpenAPI schema |
 
 **Authentication is the default for every path.** Only `/health`, `/ready`, `/docs` and
@@ -128,9 +128,9 @@ The server uses a constant-time comparison. Missing or wrong keys receive 401, s
 the request rate limit. If `API_KEY` is empty, protected routes fail closed.
 For existing deployments, replace `API_KEYS` with a single `API_KEY` in the service environment.
 
-Request body: `query` (string, 1 to `MAX_QUERY_CHARS` characters, default 2,000; longer gets
-422) and optional `top_k` (integer 1–20, default 5, the number of passages sent to the LLM and
-returned as citations).
+The request body requires a nonblank `query` string of up to `MAX_QUERY_CHARS` characters
+(default 2,000). Optional `top_k` is an integer from 1 to 20, defaults to 5, and caps the
+number of passages sent to the LLM and returned as citations.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
@@ -162,7 +162,7 @@ error, 502 unexpected non-LLM runtime failure, 503 artifacts missing or failing 
 ```bash
 git clone https://github.com/manojkumargudge/hybrid-rag-ms-marco.git
 cd hybrid-rag-ms-marco
-python scripts/fetch_artifacts.py    # ~370 MB from the v3-artifacts release, sha256-verified
+python scripts/fetch_artifacts.py    # Download and verify the v3 release artifacts
 cp .env.example .env                 # set GROQ_API_KEY; set API_KEY to a strong random value
 docker compose up --build -d
 curl http://localhost:8000/ready
@@ -175,13 +175,13 @@ curl -X POST http://localhost:8000/api/v1/query \
   corpus v3 from the GitHub release
   [`v3-artifacts`](https://github.com/manojkumargudge/hybrid-rag-ms-marco/releases/tag/v3-artifacts)
   into `artifacts/v3/`. Every file must match the SHA-256 in the committed
-  [`manifests/v3.json`](manifests/v3.json); a mismatching file is deleted, the script exits
-  non-zero, and existing files are never overwritten. See [Data](#data) for the terms.
+  [`manifests/v3.json`](manifests/v3.json). A mismatch exits nonzero and discards any temporary
+  download. Existing files are preserved. See [Data](#data) for the terms.
 - Set `API_KEY` in your client shell to the value configured on the server before running curl.
   `API_PORT` in `.env` sets the host port (default 8000).
 - **The image** installs hash-locked CPU-only dependencies and bakes in the pinned model
   revisions; it runs with Hugging Face offline mode. `artifacts/v3` is mounted read-only, never
-  copied into the image. `/ready` returns 503 until `artifacts/v3` is present.
+  copied into the image.
 
 ### Run without Docker
 
@@ -210,7 +210,7 @@ python -m scripts.verify_artifacts                       # sha256 + row-count ch
 
 Seed 42, the sampling rules and the pinned model revisions are recorded in
 `artifacts/v3/manifest.json` (committed copy: [`manifests/v3.json`](manifests/v3.json)). The
-scripts refuse to overwrite existing artifacts. The FAISS index of a rebuild may not be
+data preparation and index scripts require `--force` to overwrite existing outputs. The FAISS index of a rebuild may not be
 byte-identical on different CPUs; `fetch_artifacts.py` gives the exact published files.
 
 ### Reproduce the evaluation
@@ -254,7 +254,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `RERANKER_MODEL` / `RERANKER_MODEL_REVISION` | `cross-encoder/ms-marco-MiniLM-L-6-v2` @ `233902d2…` | Cross-encoder (pinned commit) |
 | `RETRIEVAL_MODE` | `dense` | `dense` or `hybrid` |
 | `RERANK_DEPTH` | `20` | Candidates the cross-encoder reranks |
-| `RERANK_TOP_K` | `5` | Passages sent to the LLM (default for `top_k`) |
+| `RERANK_TOP_K` | `5` | Fallback for direct service calls that omit `top_k`. The HTTP API defaults to 5 independently. |
 | `RETRIEVAL_K` | `20` | Hybrid only: candidates from each retriever before fusion |
 | `RRF_K` | `60` | Hybrid only: RRF constant |
 | `HYBRID_DENSE_WEIGHT` | `0.5` | Hybrid only: dense weight in RRF (0.5 = standard RRF) |
@@ -293,10 +293,12 @@ an offline model-load check and a container smoke test. Dependencies are pinned 
 ## Operations
 
 **Probes.**
-- `/health`: liveness. Always 200 while the process serves.
-- `/ready`: readiness. 200 only when the artifacts, `GROQ_API_KEY` and `API_KEY` are configured. Neither probe needs a key or counts against the rate limit.
+- `/health` returns 200 for valid hosts while the process serves.
+- `/ready` returns 200 when the required artifact files exist and both keys are configured,
+  or 503 otherwise. It checks file presence. Artifact verification and model loading happen
+  when the query service initializes. Neither probe needs a key or counts against the rate limit.
 
-**Logs.** One JSON object per line on stdout, with `timestamp`, `level`, `logger`, `message`,
+**Logs.** The app's default logging handler writes one JSON object per line to stderr, with `timestamp`, `level`, `logger`, `message`,
 `request_id` and `key_id`, plus context fields such as `method`, `path`, `status_code`,
 `latency_ms`, `stage`, `stage_ms` and `error_type`.
 Request logs use the matched route template for `path`, or `-` when no route was matched.
@@ -343,8 +345,8 @@ the proxy's address.
 - **Only timeouts, 429 and 5xx are retried**, up to `GROQ_MAX_RETRIES` (default 2) times, with
   exponential backoff (0.2 s, 0.4 s). Other 4xx and non-timeout errors fail immediately.
 - All attempts and sleeps share a `GENERATION_DEADLINE_SECONDS` budget (default 20). Each
-  attempt's timeout is capped by the time left, and no attempt or backoff starts past the
-  deadline, so the worst case is about 20 s.
+  attempt's configured timeout is capped by the time left. The generator checks the budget
+  before starting an attempt or sleeping for backoff.
 - If generation still fails, the API returns the reranked passages with `answer: null`,
   `error: "generation_failed"`, and increments `rag_errors_total{type="generation_failed"}`.
 
@@ -352,7 +354,8 @@ the proxy's address.
 keeps its own counters. With N workers or instances, a key can make up to N ×
 `RATE_LIMIT_PER_MIN` requests per minute. Multi-worker or multi-instance deployments need a
 shared store such as **Redis** for the limiter. Metrics are also per process, so each
-worker/instance must be scraped separately (or use the Prometheus client's multiprocess mode).
+worker/instance needs an individually addressable scrape target. The app uses an in-process
+Prometheus registry.
 
 ## Security
 
@@ -361,7 +364,8 @@ The CI `security` job runs [`scripts/security_audit.sh`](scripts/security_audit.
 - **pip-audit** (2.10.1) on both lockfiles (`requirements.lock`, `requirements-dev.lock`) in
   `--strict` mode, so any package it cannot audit fails the job. Nothing is installed:
   `--require-hashes --disable-pip`.
-- **bandit** (1.9.4) on `app/` at medium severity and above (`-ll`).
+- **bandit** (1.9.4) on `app/` at medium severity and above (`-ll`). The gate fails on
+  scanner errors, unapproved findings and expired exceptions.
 
 Run it locally with `pip install pip-audit==2.10.1 bandit==1.9.4 && sh scripts/security_audit.sh`.
 
@@ -383,13 +387,14 @@ Other measures:
 
 - The corpus is a 150k-passage subset, so absolute scores are not comparable to full-corpus
   results.
-- Hard negatives come from BM25 candidate pools, so the eval leans against BM25 and hybrid.
-- Latency was measured on one laptop CPU; there is no GPU path and no concurrency benchmark.
+- Hard negatives come from BM25 candidate pools.
+- Latency was measured sequentially on one laptop CPU. The published results contain no GPU
+  or concurrency benchmark.
 - The rate limiter is in-memory and per process; multi-worker or multi-instance deployments
   need Redis (or similar) to share it. Unauthenticated requests are keyed on the TCP peer, so
   behind a proxy they share one bucket.
-- Answers depend on an external LLM API. The prompt restricts the model to the retrieved
-  passages, but there is no automatic faithfulness check.
+- Answers depend on an external LLM API. The prompt asks the model to use the retrieved
+  passages as its source. The service does not check answer faithfulness.
 
 ## History
 
