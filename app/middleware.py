@@ -18,7 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.auth import API_KEY_HEADER, configured_keys, is_valid_key
+from app.auth import API_KEY_HEADER, configured_key, is_valid_key
 from app.config import settings
 from app.metrics import ERRORS, REQUESTS
 
@@ -82,13 +82,14 @@ class ProductionMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         try:
-            auth_required = (
-                not settings.auth_disabled
-                and request.method != "OPTIONS"  # CORS preflight carries no key
-                and path not in OPEN_PATHS
+            is_preflight = (
+                request.method == "OPTIONS"
+                and "Origin" in request.headers
+                and "Access-Control-Request-Method" in request.headers
             )
+            auth_required = path not in OPEN_PATHS and not is_preflight
             provided = request.headers.get(API_KEY_HEADER)
-            authenticated = is_valid_key(provided, configured_keys())
+            authenticated = is_valid_key(provided, configured_key())
             if authenticated:
                 key_id = key_id_for(provided)
                 # Every log line of this request (incl. the access log) carries it.

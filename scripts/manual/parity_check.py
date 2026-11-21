@@ -4,7 +4,7 @@
 
 Sends the first n eval-split queries (default 50) to POST /api/v1/query with
 top_k=10 and compares passage ids, in order, to per_query.jsonl. Sends the
-API key from the API_KEY environment variable (one of the server's API_KEYS).
+API key from the API_KEY environment variable (matching the server's API_KEY).
 """
 
 import json

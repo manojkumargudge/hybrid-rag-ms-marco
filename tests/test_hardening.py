@@ -75,7 +75,7 @@ def test_cors_preflight_is_not_blocked_by_auth(anon_client):
 # --- per-key rate limit ---------------------------------------------------
 
 def test_rate_limit_is_per_key(anon_client, mock_service, monkeypatch):
-    monkeypatch.setattr(settings, "api_keys", "key-a,key-b")
+    monkeypatch.setattr(settings, "api_key", "key-a")
     monkeypatch.setattr(settings, "rate_limit_per_min", 3)
 
     def get(key):
@@ -85,7 +85,9 @@ def test_rate_limit_is_per_key(anon_client, mock_service, monkeypatch):
     limited = get("key-a")
     assert limited.status_code == 429
     assert limited.headers["Retry-After"] == "60"
-    # Same client IP, different key: unaffected.
+    # Rotating the key starts a fresh rate-limit bucket.
+    monkeypatch.setattr(settings, "api_key", "key-b")
+    assert get("key-a").status_code == 401
     assert get("key-b").status_code == 200
     # Probes are never limited.
     assert anon_client.get("/health").status_code == 200

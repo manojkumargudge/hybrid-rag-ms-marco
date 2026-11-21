@@ -45,51 +45,47 @@ def test_valid_key_is_accepted(client, mock_service, method, path, body):
     assert _call(client, method, path, body).status_code == 200
 
 
-def test_any_of_several_comma_separated_keys_works(anon_client, mock_service, monkeypatch):
-    monkeypatch.setattr(settings, "api_keys", " key-a , key-b ,, ")
-    for key in ("key-a", "key-b"):
-        response = anon_client.post("/api/v1/query", json={"query": "q"},
-                                    headers={"X-API-Key": key})
-        assert response.status_code == 200, key
-    response = anon_client.post("/api/v1/query", json={"query": "q"},
-                                headers={"X-API-Key": "key-a,key-b"})
-    assert response.status_code == 401
-
-
 def test_health_and_ready_are_open(anon_client):
     assert anon_client.get("/health").status_code == 200
     assert anon_client.get("/ready").status_code in {200, 503}
 
 
-def test_no_keys_configured_fails_closed(anon_client, mock_service, monkeypatch):
-    monkeypatch.setattr(settings, "api_keys", "")
+def test_no_key_configured_fails_closed(anon_client, mock_service, monkeypatch):
+    monkeypatch.setattr(settings, "api_key", "")
     for header in ({}, {"X-API-Key": ""}, {"X-API-Key": "anything"}):
         response = anon_client.post("/api/v1/query", json={"query": "q"}, headers=header)
         assert response.status_code == 401
     assert anon_client.get("/ready").status_code == 503
 
 
-def test_auth_disabled_skips_check_and_warns(anon_client, mock_service, monkeypatch, caplog):
-    monkeypatch.setattr(settings, "auth_disabled", True)
-    monkeypatch.setattr(settings, "api_keys", "")
-
-    assert anon_client.post("/api/v1/query", json={"query": "q"}).status_code == 200
-    with caplog.at_level(logging.WARNING, logger="app.auth"):
-        log_auth_configuration()
-    assert any("auth_disabled" in record.getMessage() for record in caplog.records)
-
-
-def test_auth_is_on_by_default():
+def test_api_key_environment(monkeypatch):
     from app.config import Settings
 
-    assert Settings.model_fields["auth_disabled"].default is False
-    assert Settings.model_fields["api_keys"].default == ""
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setenv("API_KEYS", "legacy")
+    monkeypatch.setenv("AUTH_DISABLED", "true")
+    assert Settings(_env_file=None).api_key == ""
+
+    monkeypatch.setenv("API_KEY", "configured")
+    assert Settings(_env_file=None).api_key == "configured"
+
+
+def test_unconfigured_key_logs_warning(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "api_key", "")
+    with caplog.at_level(logging.WARNING, logger="app.auth"):
+        log_auth_configuration()
+    assert any("auth_no_key" in record.getMessage() for record in caplog.records)
+
+
+def test_non_preflight_options_requires_key(anon_client):
+    assert anon_client.options("/api/v1/query").status_code == 401
 
 
 def test_key_comparison():
-    keys = [b"alpha", b"beta"]
-    assert is_valid_key("beta", keys)
-    assert not is_valid_key("bet", keys)
-    assert not is_valid_key("", keys)
-    assert not is_valid_key(None, keys)
-    assert not is_valid_key("café", keys)  # non-ASCII must not raise
+    key = b"beta"
+    assert is_valid_key("beta", key)
+    assert not is_valid_key("bet", key)
+    assert not is_valid_key("", key)
+    assert not is_valid_key(None, key)
+    assert not is_valid_key("caf\u00e9", key)
+    assert not is_valid_key("beta", b"")
