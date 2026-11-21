@@ -15,8 +15,7 @@ _client_ids = count()
 def _auth_settings(monkeypatch):
     """Every test runs with auth on, one known key, the default rate limit and
     an empty limiter (independent of .env and of earlier tests)."""
-    monkeypatch.setattr(settings, "api_keys", TEST_API_KEY)
-    monkeypatch.setattr(settings, "auth_disabled", False)
+    monkeypatch.setattr(settings, "api_key", TEST_API_KEY)
     monkeypatch.setattr(settings, "rate_limit_per_min", 60)
     rate_limiter.reset()
     yield

@@ -10,7 +10,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import router
 from app.artifacts import verify_artifacts
-from app.auth import API_KEY_HEADER, configured_keys, log_auth_configuration
+from app.auth import API_KEY_HEADER, configured_key, log_auth_configuration
 from app.config import settings, warn_legacy_settings
 from app.generation.groq_generator import GroqGenerator
 from app.metrics import render as render_metrics
@@ -236,8 +236,8 @@ def readiness_check() -> JSONResponse:
     ]
     if not settings.groq_api_key:
         missing.append("groq_api_key")
-    if not settings.auth_disabled and not configured_keys():
-        missing.append("api_keys")
+    if not configured_key():
+        missing.append("api_key")
 
     if missing:
         return JSONResponse(

@@ -117,18 +117,16 @@ query endpoint return 503.
 | `GET` | `/metadata` | `X-API-Key` | Model names, artifact versions, retrieval mode, rerank depth |
 | `GET` | `/metrics` | `X-API-Key` | Prometheus metrics (see [Operations](#operations)) |
 | `GET` | `/health` | open | Liveness |
-| `GET` | `/ready` | open | 200 when the configured artifacts, `GROQ_API_KEY` and API keys are present, else 503 |
+| `GET` | `/ready` | open | 200 when the configured artifacts, `GROQ_API_KEY` and `API_KEY` are present, else 503 |
 | `GET` | `/docs`, `/openapi.json` | open | Swagger UI and the OpenAPI schema |
 
 **Authentication is the default for every path.** Only `/health`, `/ready`, `/docs` and
 `/openapi.json` are open, from an explicit allowlist in the outermost middleware
 ([`app/middleware.py`](app/middleware.py)). Any other path, including routes added later, needs
-one of the keys in `API_KEYS` (comma-separated) in the `X-API-Key` header.
-- Keys are compared in constant time against every configured key.
-- A missing or wrong key gets 401.
-- With no keys configured, every protected request gets 401 (fail closed).
-- Auth is off only when `AUTH_DISABLED=true`, which logs a warning at startup and is meant for
-  local development only.
+the configured `API_KEY` in the `X-API-Key` header. CORS preflight requests are exempt.
+The server uses a constant-time comparison. Missing or wrong keys receive 401, subject to
+the request rate limit. If `API_KEY` is empty, protected routes fail closed.
+For existing deployments, replace `API_KEYS` with a single `API_KEY` in the service environment.
 
 Request body: `query` (string, 1 to `MAX_QUERY_CHARS` characters, default 2,000; longer gets
 422) and optional `top_k` (integer 1–20, default 5, the number of passages sent to the LLM and
@@ -137,7 +135,7 @@ returned as citations).
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: change-me-demo-key" \
+  -H "X-API-Key: ${API_KEY}" \
   -d '{"query": "what are the symptoms of diabetes?", "top_k": 5}'
 ```
 
@@ -165,11 +163,11 @@ error, 502 unexpected non-LLM runtime failure, 503 artifacts missing or failing 
 git clone https://github.com/manojkumargudge/hybrid-rag-ms-marco.git
 cd hybrid-rag-ms-marco
 python scripts/fetch_artifacts.py    # ~370 MB from the v3-artifacts release, sha256-verified
-cp .env.example .env                 # set GROQ_API_KEY; replace the demo API_KEYS before exposing it
+cp .env.example .env                 # set GROQ_API_KEY; set API_KEY to a strong random value
 docker compose up --build -d
 curl http://localhost:8000/ready
 curl -X POST http://localhost:8000/api/v1/query \
-  -H "Content-Type: application/json" -H "X-API-Key: change-me-demo-key" \
+  -H "Content-Type: application/json" -H "X-API-Key: ${API_KEY}" \
   -d '{"query": "what are the symptoms of diabetes?"}'
 ```
 
@@ -179,8 +177,8 @@ curl -X POST http://localhost:8000/api/v1/query \
   into `artifacts/v3/`. Every file must match the SHA-256 in the committed
   [`manifests/v3.json`](manifests/v3.json); a mismatching file is deleted, the script exits
   non-zero, and existing files are never overwritten. See [Data](#data) for the terms.
-- **`change-me-demo-key`** is the demo key from `.env.example`. **`API_PORT`** in `.env` sets
-  the host port (default 8000).
+- Set `API_KEY` in your client shell to the value configured on the server before running curl.
+  `API_PORT` in `.env` sets the host port (default 8000).
 - **The image** installs hash-locked CPU-only dependencies and bakes in the pinned model
   revisions; it runs with Hugging Face offline mode. `artifacts/v3` is mounted read-only, never
   copied into the image. `/ready` returns 503 until `artifacts/v3` is present.
@@ -192,7 +190,7 @@ python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 python scripts/fetch_artifacts.py
-cp .env.example .env                 # set GROQ_API_KEY and API_KEYS
+cp .env.example .env                 # set GROQ_API_KEY and API_KEY
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
@@ -247,8 +245,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | Variable | Default | Purpose |
 |---|---|---|
 | `GROQ_API_KEY` | empty | Required for answers |
-| `API_KEYS` | empty | Comma-separated client keys accepted in `X-API-Key`; empty = every protected request gets 401 |
-| `AUTH_DISABLED` | `false` | `true` turns API-key auth off (local development only; logs a warning) |
+| `API_KEY` | empty | Key accepted in `X-API-Key`. Protected routes fail closed when empty. |
 | `API_PORT` | `8000` | Docker Compose host port (the container always listens on 8000) |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | LLM for the final answer |
 | `GROQ_TIMEOUT_SECONDS` / `GROQ_MAX_RETRIES` | `10` / `2` | Per-attempt LLM timeout; retries on timeouts, 429 and 5xx only (backoff 0.2 s, 0.4 s, …) |
@@ -297,8 +294,7 @@ an offline model-load check and a container smoke test. Dependencies are pinned 
 
 **Probes.**
 - `/health`: liveness. Always 200 while the process serves.
-- `/ready`: readiness. 200 only when the artifacts, `GROQ_API_KEY` and (with auth on) at least
-  one API key are configured. Neither probe needs a key or counts against the rate limit.
+- `/ready`: readiness. 200 only when the artifacts, `GROQ_API_KEY` and `API_KEY` are configured. Neither probe needs a key or counts against the rate limit.
 
 **Logs.** One JSON object per line on stdout, with `timestamp`, `level`, `logger`, `message`,
 `request_id` and `key_id`, plus context fields such as `method`, `path`, `status_code`,
