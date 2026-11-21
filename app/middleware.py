@@ -20,7 +20,7 @@ from starlette.responses import Response
 
 from app.auth import API_KEY_HEADER, configured_key, is_valid_key
 from app.config import settings
-from app.metrics import ERRORS, REQUESTS
+from app.metrics import ERRORS, REQUEST_LATENCY, REQUESTS
 
 request_id_context: ContextVar[str] = ContextVar("request_id", default="-")
 key_id_context: ContextVar[str] = ContextVar("key_id", default="-")
@@ -71,8 +71,15 @@ def _json_error(status_code: int, detail: str, headers: dict | None = None) -> J
 class ProductionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         supplied_id = request.headers.get("X-Request-ID", "")
+        provided = request.headers.get(API_KEY_HEADER)
+        key = configured_key()
+        id_contains_key = (provided and provided in supplied_id) or (
+            key and key in supplied_id.encode()
+        )
         request_id = (
-            supplied_id if _REQUEST_ID_PATTERN.fullmatch(supplied_id) else uuid.uuid4().hex
+            supplied_id
+            if _REQUEST_ID_PATTERN.fullmatch(supplied_id) and not id_contains_key
+            else uuid.uuid4().hex
         )
         request_token = request_id_context.set(request_id)
         key_token = key_id_context.set("-")
@@ -88,8 +95,7 @@ class ProductionMiddleware(BaseHTTPMiddleware):
                 and "Access-Control-Request-Method" in request.headers
             )
             auth_required = path not in OPEN_PATHS and not is_preflight
-            provided = request.headers.get(API_KEY_HEADER)
-            authenticated = is_valid_key(provided, configured_key())
+            authenticated = is_valid_key(provided, key)
             if authenticated:
                 key_id = key_id_for(provided)
                 # Every log line of this request (incl. the access log) carries it.
@@ -119,14 +125,16 @@ class ProductionMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = request_id
             return response
         finally:
+            elapsed = time.perf_counter() - started_at
             REQUESTS.labels(status=str(status_code)).inc()
+            REQUEST_LATENCY.observe(elapsed)
             logger.info(
                 "request_complete",
                 extra={
                     "method": request.method,
-                    "path": path,
+                    "path": getattr(request.scope.get("route"), "path", "-"),
                     "status_code": status_code,
-                    "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    "latency_ms": round(elapsed * 1000, 2),
                 },
             )
             key_id_context.reset(key_token)

@@ -70,6 +70,8 @@ def _configure_logging() -> None:
     _install_context_record_factory()
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
+    # HTTPX logs full URLs at INFO.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     if not root_logger.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(_JsonFormatter())

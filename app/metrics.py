@@ -39,6 +39,11 @@ REQUESTS = Counter(
     ["status"],
     registry=REGISTRY,
 )
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "Time to produce an HTTP response.",
+    registry=REGISTRY,
+)
 
 # Pre-create label values so every series is exported from the first scrape.
 for _stage in STAGES:
