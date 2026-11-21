@@ -1,0 +1,22 @@
+[
+  {
+    "tool": "bandit",
+    "id": "B301",
+    "scope": [
+      "app/retrieval/bm25_retriever.py",
+      "self.bm25 = pickle.load(file)"
+    ],
+    "reason": "The optional BM25 index is unpickled only after SHA-256 verification against the artifact manifest. Keep that manifest and the index in a trusted, read-only mount while the index uses pickle.",
+    "expires": "2026-12-31"
+  },
+  {
+    "tool": "bandit",
+    "id": "B301",
+    "scope": [
+      "app/retrieval/bm25_retriever.py",
+      "self.tokenized_corpus = pickle.load(file)"
+    ],
+    "reason": "The optional pretokenized BM25 corpus is unpickled only after SHA-256 verification against the artifact manifest. Keep both files in a trusted, read-only mount while the corpus uses pickle.",
+    "expires": "2026-12-31"
+  }
+]
