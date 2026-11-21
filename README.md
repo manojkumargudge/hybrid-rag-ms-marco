@@ -126,11 +126,13 @@ query endpoint return 503.
 the configured `API_KEY` in the `X-API-Key` header. CORS preflight requests are exempt.
 The server uses a constant-time comparison. Missing or wrong keys receive 401, subject to
 the request rate limit. If `API_KEY` is empty, protected routes fail closed.
-For existing deployments, replace `API_KEYS` with a single `API_KEY` in the service environment.
+For existing deployments, replace `API_KEYS` with a single `API_KEY` in the service
+environment. The removed `AUTH_DISABLED` setting is ignored.
 
 Request body: `query` (string, 1 to `MAX_QUERY_CHARS` characters, default 2,000; longer gets
 422) and optional `top_k` (integer 1–20, default 5, the number of passages sent to the LLM and
-returned as citations).
+returned as citations). Requests above `MAX_QUERY_BODY_BYTES` (32,768 by default) get 413
+before JSON parsing. Set `API_KEY` in your shell to the key configured on the server.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
@@ -177,7 +179,7 @@ curl -X POST http://localhost:8000/api/v1/query \
   into `artifacts/v3/`. Every file must match the SHA-256 in the committed
   [`manifests/v3.json`](manifests/v3.json); a mismatching file is deleted, the script exits
   non-zero, and existing files are never overwritten. See [Data](#data) for the terms.
-- Set `API_KEY` in your client shell to the value configured on the server before running curl.
+- Set `API_KEY` in your shell to the configured value before running curl.
   `API_PORT` in `.env` sets the host port (default 8000).
 - **The image** installs hash-locked CPU-only dependencies and bakes in the pinned model
   revisions; it runs with Hugging Face offline mode. `artifacts/v3` is mounted read-only, never
@@ -191,7 +193,7 @@ source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 python scripts/fetch_artifacts.py
 cp .env.example .env                 # set GROQ_API_KEY and API_KEY
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers --no-access-log
 ```
 
 ### Build corpus v3 from source instead
@@ -263,6 +265,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `APPLICATION_VERSION` / `GIT_VERSION` | `1.0.0` / `unknown` | Reported by `/metadata` |
 | `RATE_LIMIT_PER_MIN` | `60` | Requests per minute per API key (per client IP when unauthenticated); `0` disables |
 | `MAX_QUERY_CHARS` | `2000` | Longest accepted `query`; longer gets 422 |
+| `MAX_QUERY_BODY_BYTES` | `32768` | Maximum query request body size in bytes, including streamed bodies |
 | `TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Allowed `Host` headers |
 | `CORS_ORIGINS` | empty | Allowed browser origins (empty = none) |
 
@@ -353,25 +356,28 @@ worker/instance must be scraped separately (or use the Prometheus client's multi
 
 ## Security
 
-The CI `security` job runs [`scripts/security_audit.sh`](scripts/security_audit.sh):
+[CI](.github/workflows/ci.yml) runs the following checks.
 
-- **pip-audit** (2.10.1) on both lockfiles (`requirements.lock`, `requirements-dev.lock`) in
-  `--strict` mode, so any package it cannot audit fails the job. Nothing is installed:
-  `--require-hashes --disable-pip`.
-- **bandit** (1.9.4) on `app/` at medium severity and above (`-ll`).
+- **pip-audit** checks both hash-locked dependency lists in strict mode. The audit
+  checks PyTorch's upstream release because the CPU-build version suffix is local
+  to the PyTorch index.
+- **Bandit** scans application code for medium and high severity findings.
+- **Trivy** scans the built container image for high and critical OS and library
+  vulnerabilities.
+- **Gitleaks** scans reachable Git history with findings redacted.
+- **Dependabot** checks Python, Docker and GitHub Actions dependencies weekly.
 
-Run it locally with `pip install pip-audit==2.10.1 bandit==1.9.4 && sh scripts/security_audit.sh`.
+The [security ignore file](.github/security-ignore.json) records the exact scope,
+reason and UTC expiry for each accepted finding. CI fails the day after an
+exception's listed expiry, even if its finding no longer appears. The BM25
+operator must keep the manifest and pickle artifacts trusted and read-only.
 
-Accepted findings and workarounds, each with its reason:
-
-| Tool | Finding | Where | Decision and reason |
-|---|---|---|---|
-| bandit | B301, pickle deserialization (medium) | `app/retrieval/bm25_retriever.py`, both `pickle.load` calls | **Ignored with `# nosec B301`.** The BM25 index is a `rank_bm25` object stored as a pickle. Immediately before each load, `verify_artifacts` checks the file's SHA-256 against `manifest.json`, and a mismatch raises before anything is unpickled. A test covers tampered-pickle rejection. The residual risk is someone who can write both the pickle and the manifest; artifacts are mounted read-only. |
-| bandit | B403, `import pickle` (low) | same file | Below the `-ll` gate; same reason as B301. |
-| pip-audit | `torch==2.13.0+cpu` cannot be looked up | both lockfiles | **Audited as `torch==2.13.0`.** `+cpu` is a local version from the PyTorch CPU index and isn't on PyPI. The script audits a temporary copy of each lockfile with the suffix removed (same upstream release, CPU-only build) and fails if that copy is empty or lost torch. |
+To run dependency and application scans locally, install
+`pip-audit==2.10.1` and `bandit==1.9.4`, then run `sh scripts/security_audit.sh`.
 
 Other measures:
-- API-key auth fails closed (see [API](#api)).
+- API-key auth fails closed (see [API](#api)). The application writes request logs,
+  and the documented Uvicorn commands disable its raw access log.
 - Artifacts are SHA-256-verified before load.
 - Models are pinned to commit SHAs and baked into the image, which runs offline as a non-root user.
 - Dependencies are hash-locked.

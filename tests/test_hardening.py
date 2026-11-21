@@ -7,6 +7,7 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import anyio
 import httpx
 import pytest
 from groq import APIStatusError, APITimeoutError
@@ -14,7 +15,7 @@ from groq import APIStatusError, APITimeoutError
 from app.config import settings
 from app.generation.groq_generator import GroqGenerator
 from app.main import _JsonFormatter, app
-from app.middleware import OPEN_PATHS
+from app.middleware import OPEN_PATHS, QueryBodyLimitMiddleware
 from app.rag_service import RAGService
 from tests.conftest import TEST_API_KEY
 
@@ -196,7 +197,7 @@ def test_logs_have_request_id_and_key_id_but_never_the_raw_key(client, anon_clie
                                                                 monkeypatch, caplog):
     ok = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="fine"))])
     _service_with_groq(monkeypatch, [ok])
-    wrong_key = "wrong-secret-key-123"
+    wrong_key = "invalid-fixture"
     formatter = _JsonFormatter()
 
     with caplog.at_level(logging.INFO):
@@ -299,7 +300,7 @@ def test_spoofed_xff_does_not_reset_ip_limit_under_uvicorn(monkeypatch):
     while not server.started and _time.monotonic() < deadline:
         _time.sleep(0.05)
     try:
-        with httpx.Client(base_url=f"http://127.0.0.1:{port}") as client:
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}", trust_env=False) as client:
             codes = [client.get("/metadata", headers={"X-API-Key": f"guess-{i}",
                                                       "X-Forwarded-For": f"10.0.0.{i}"}
                                 ).status_code for i in range(4)]
@@ -319,3 +320,58 @@ def test_every_uvicorn_launch_disables_proxy_headers():
     readme = (root / "README.md").read_text(encoding="utf-8")
     assert all("--no-proxy-headers" in line
                for line in readme.splitlines() if line.startswith("uvicorn app.main:app"))
+
+
+def test_body_byte_limit_accepts_exact_size_and_rejects_over_limit(client, mock_service, monkeypatch):
+    body = '{"query":"é"}'.encode()
+    monkeypatch.setattr(settings, "max_query_body_bytes", len(body))
+    headers = {"Content-Type": "application/json"}
+
+    assert client.post("/api/v1/query", content=body, headers=headers).status_code == 200
+    response = client.post("/api/v1/query", content=body + b" ", headers=headers)
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Request body exceeds the byte limit."}
+    assert "X-Request-ID" in response.headers
+    mock_service.answer.assert_called_once()
+
+
+def test_body_byte_limit_checks_stream_even_without_content_length(monkeypatch):
+    monkeypatch.setattr(settings, "max_query_body_bytes", 14)
+    chunks = iter([
+        {"type": "http.request", "body": b'{"query":"', "more_body": True},
+        {"type": "http.request", "body": b"large", "more_body": True},
+        {"type": "http.request", "body": b'"}', "more_body": False},
+    ])
+    sent = []
+
+    async def receive():
+        return next(chunks)
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(*args):
+        pytest.fail("Oversized request passed through the middleware")
+
+    scope = {"type": "http", "method": "POST", "path": "/api/v1/query", "headers": []}
+    anyio.run(QueryBodyLimitMiddleware(downstream), scope, receive, send)
+    assert sent[0]["status"] == 413
+    assert next(chunks)["more_body"] is False
+
+
+def test_body_limit_runs_after_auth(client, anon_client, mock_service, monkeypatch):
+    monkeypatch.setattr(settings, "max_query_body_bytes", 2)
+    assert anon_client.post("/api/v1/query", content=b"oversize").status_code == 401
+    assert client.post("/api/v1/query", content=b"oversize").status_code == 413
+    mock_service.answer.assert_not_called()
+
+
+def test_key_copied_into_request_metadata_is_omitted_from_logs(client, caplog):
+    with caplog.at_level(logging.INFO):
+        response = client.get(f"/{TEST_API_KEY}", headers={"X-Request-ID": f"id-{TEST_API_KEY}"})
+
+    assert response.status_code == 404
+    assert TEST_API_KEY not in response.headers["X-Request-ID"]
+    application_records = [record for record in caplog.records if record.name.startswith("app.")]
+    assert application_records
+    assert TEST_API_KEY not in "\n".join(map(_JsonFormatter().format, application_records))

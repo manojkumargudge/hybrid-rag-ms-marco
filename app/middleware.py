@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.auth import API_KEY_HEADER, configured_key, is_valid_key
 from app.config import settings
@@ -68,11 +69,61 @@ def _json_error(status_code: int, detail: str, headers: dict | None = None) -> J
     return JSONResponse(status_code=status_code, content={"detail": detail}, headers=headers)
 
 
+class QueryBodyLimitMiddleware:
+    """Bound the query body before JSON parsing, including chunked requests."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or scope["method"] != "POST"
+            or scope["path"].rstrip("/") != "/api/v1/query"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        limit = settings.max_query_body_bytes
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > limit:
+                ERRORS.labels(type="body_too_large").inc()
+                response = _json_error(413, "Request body exceeds the byte limit.")
+                await response(scope, receive, send)
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if replayed:
+                return await receive()
+            replayed = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
 class ProductionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         supplied_id = request.headers.get("X-Request-ID", "")
+        provided = request.headers.get(API_KEY_HEADER)
+        key = configured_key()
+        id_contains_key = (provided and provided in supplied_id) or (
+            key and key in supplied_id.encode()
+        )
         request_id = (
-            supplied_id if _REQUEST_ID_PATTERN.fullmatch(supplied_id) else uuid.uuid4().hex
+            supplied_id
+            if _REQUEST_ID_PATTERN.fullmatch(supplied_id) and not id_contains_key
+            else uuid.uuid4().hex
         )
         request_token = request_id_context.set(request_id)
         key_token = key_id_context.set("-")
@@ -82,14 +133,13 @@ class ProductionMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         try:
-            is_preflight = (
+            cors_preflight = (
                 request.method == "OPTIONS"
-                and "Origin" in request.headers
-                and "Access-Control-Request-Method" in request.headers
+                and "origin" in request.headers
+                and "access-control-request-method" in request.headers
             )
-            auth_required = path not in OPEN_PATHS and not is_preflight
-            provided = request.headers.get(API_KEY_HEADER)
-            authenticated = is_valid_key(provided, configured_key())
+            auth_required = not cors_preflight and path not in OPEN_PATHS
+            authenticated = provided is not None and is_valid_key(provided, key)
             if authenticated:
                 key_id = key_id_for(provided)
                 # Every log line of this request (incl. the access log) carries it.
@@ -124,7 +174,7 @@ class ProductionMiddleware(BaseHTTPMiddleware):
                 "request_complete",
                 extra={
                     "method": request.method,
-                    "path": path,
+                    "path": getattr(request.scope.get("route"), "path", "-"),
                     "status_code": status_code,
                     "latency_ms": round((time.perf_counter() - started_at) * 1000, 2),
                 },

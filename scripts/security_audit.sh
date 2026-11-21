@@ -13,7 +13,9 @@ cd "$(git rev-parse --show-toplevel)"
 PIP_AUDIT="${PIP_AUDIT:-pip-audit}"
 BANDIT="${BANDIT:-bandit}"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -f "$tmp/requirements.lock" "$tmp/requirements-dev.lock" "$tmp/bandit.json"; rmdir "$tmp"' EXIT
+
+python scripts/security_gate.py expiry
 
 for lock in requirements.lock requirements-dev.lock; do
   sed 's/==2\.13\.0+cpu/==2.13.0/' "$lock" > "$tmp/$lock"
@@ -27,4 +29,5 @@ for lock in requirements.lock requirements-dev.lock; do
 done
 
 echo "bandit: app/ (severity >= medium)"
-$BANDIT -r app -ll
+"$BANDIT" -r app -ll --ignore-nosec --exit-zero -f json -o "$tmp/bandit.json"
+python scripts/security_gate.py bandit "$tmp/bandit.json"

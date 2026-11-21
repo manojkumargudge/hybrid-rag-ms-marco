@@ -24,14 +24,13 @@ class BM25Retriever:
         # matches the build manifest.
         verify_artifacts(manifest_path, self.index_path, self.corpus_path)
 
-        # Load pre-built BM25 index. B301 is accepted: the file's sha256 was
-        # checked against the manifest just above (see README, Security).
+        # Load the pre-built, sha256-verified BM25 index.
         with open(self.index_path, "rb") as file:
-            self.bm25 = pickle.load(file)  # nosec B301
+            self.bm25 = pickle.load(file)
 
         # Load pre-tokenized corpus (sha256-verified above).
         with open(self.corpus_path, "rb") as file:
-            self.tokenized_corpus = pickle.load(file)  # nosec B301
+            self.tokenized_corpus = pickle.load(file)
 
         # Load passages
         self.passages = pd.read_parquet(self.passages_path)

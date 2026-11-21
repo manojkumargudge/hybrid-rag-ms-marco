@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.auth import is_valid_key, log_auth_configuration
-from app.config import settings
+from app.config import settings, warn_legacy_settings
 from app.main import app
 
 PROTECTED = [("post", "/api/v1/query", {"query": "test query"}), ("get", "/metadata", None)]
@@ -58,7 +58,7 @@ def test_no_key_configured_fails_closed(anon_client, mock_service, monkeypatch):
     assert anon_client.get("/ready").status_code == 503
 
 
-def test_api_key_environment(monkeypatch):
+def test_api_key_environment(monkeypatch, caplog):
     from app.config import Settings
 
     monkeypatch.delenv("API_KEY", raising=False)
@@ -67,7 +67,12 @@ def test_api_key_environment(monkeypatch):
     assert Settings(_env_file=None).api_key == ""
 
     monkeypatch.setenv("API_KEY", "configured")
-    assert Settings(_env_file=None).api_key == "configured"
+    configured = Settings(_env_file=None)
+    assert configured.api_key == "configured"
+    assert "configured" not in repr(configured)
+    warn_legacy_settings()
+    assert "legacy_setting_ignored: AUTH_DISABLED" in caplog.text
+    assert "legacy_setting_ignored: API_KEYS" in caplog.text
 
 
 def test_unconfigured_key_logs_warning(monkeypatch, caplog):

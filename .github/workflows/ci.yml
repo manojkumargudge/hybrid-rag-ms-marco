@@ -41,8 +41,32 @@ jobs:
           python-version: "3.11"
       - name: Install audit tools
         run: pip install pip-audit==2.10.1 bandit==1.9.4
-      - name: pip-audit (lockfiles, strict) + bandit -ll (app/)
+      - name: Validate expiry, audit lockfiles, and scan application code
         run: sh scripts/security_audit.sh
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Scan reachable history with Gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --output "$archive"
+          echo "$GITLEAKS_SHA256  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          status=0
+          "$RUNNER_TEMP/gitleaks" git --redact=100 --ignore-gitleaks-allow --log-opts=HEAD \
+            --gitleaks-ignore-path /dev/null --exit-code 2 --report-format json \
+            --report-path "$RUNNER_TEMP/gitleaks.json" . || status=$?
+          if [[ "$status" != 0 && "$status" != 2 ]]; then exit "$status"; fi
+          python3 scripts/security_gate.py gitleaks "$RUNNER_TEMP/gitleaks.json"
 
   docker:
     runs-on: ubuntu-latest
@@ -50,6 +74,21 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build image (no data/indices in context)
         run: docker build -t hybrid-rag:ci .
+      - name: Scan built image with Trivy (high and critical)
+        env:
+          TRIVY_VERSION: 0.76.2
+          TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+        run: |
+          archive="$RUNNER_TEMP/trivy.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            --output "$archive"
+          echo "$TRIVY_SHA256  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" trivy
+          "$RUNNER_TEMP/trivy" image --image-src docker --scanners vuln \
+            --severity HIGH,CRITICAL --ignorefile /dev/null --format json \
+            --output "$RUNNER_TEMP/trivy.json" hybrid-rag:ci
+          python3 scripts/security_gate.py trivy "$RUNNER_TEMP/trivy.json"
       - name: Report image size
         run: |
           docker image inspect hybrid-rag:ci --format '{{.Size}}' \

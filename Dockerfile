@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,6 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/opt/hf-cache
 
 WORKDIR /app
+
+# Pull the Debian security update for zlib ahead of the base-image refresh.
+RUN --mount=type=cache,target=/var/lib/apt/lists,sharing=locked apt-get update \
+    && apt-get install --yes --no-install-recommends --only-upgrade zlib1g
 
 # Hash-locked, CPU-only dependencies (see scripts/lock_deps.sh).
 COPY requirements.lock .
@@ -35,4 +39,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # --no-proxy-headers: rate limiting keys unauthenticated clients on the TCP
 # peer address; never let a client-supplied X-Forwarded-For replace it.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers", "--no-access-log"]

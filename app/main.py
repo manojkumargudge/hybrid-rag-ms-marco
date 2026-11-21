@@ -14,7 +14,12 @@ from app.auth import API_KEY_HEADER, configured_key, log_auth_configuration
 from app.config import settings, warn_legacy_settings
 from app.generation.groq_generator import GroqGenerator
 from app.metrics import render as render_metrics
-from app.middleware import ProductionMiddleware, key_id_context, request_id_context
+from app.middleware import (
+    ProductionMiddleware,
+    QueryBodyLimitMiddleware,
+    key_id_context,
+    request_id_context,
+)
 from app.rag_service import RAGService
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
 from app.retrieval.bm25_retriever import BM25Retriever
@@ -157,6 +162,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-Request-ID", API_KEY_HEADER],
 )
+app.add_middleware(QueryBodyLimitMiddleware)
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=[
