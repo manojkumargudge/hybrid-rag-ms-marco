@@ -1,7 +1,9 @@
 from logging import getLogger
+from math import isfinite
 from time import perf_counter
 from typing import Protocol
 
+from app.generation.citations import INSUFFICIENT_EVIDENCE, has_returned_citations
 from app.generation.groq_generator import GroqCircuitOpen, GroqGenerator
 from app.metrics import ERRORS, STAGE_LATENCY
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
@@ -32,6 +34,7 @@ class RAGService:
         generator: GroqGenerator,
         rerank_depth: int = 20,
         rerank_top_k: int = 5,
+        min_rerank_score: float | None = None,
     ) -> None:
         if rerank_depth <= 0:
             raise ValueError("rerank_depth must be greater than zero.")
@@ -45,6 +48,7 @@ class RAGService:
 
         self.rerank_depth = rerank_depth
         self.rerank_top_k = rerank_top_k
+        self.min_rerank_score = min_rerank_score
 
     def answer(self, query: str, top_k: int | None = None) -> dict:
         """
@@ -99,6 +103,12 @@ class RAGService:
                 "latency_ms": _elapsed_ms(started_at),
             }
 
+        score = reranked_results[0]["score"]
+        if self.min_rerank_score is not None and (
+            not isfinite(score) or score < self.min_rerank_score
+        ):
+            return _passages_only("low_retrieval_confidence", reranked_results, started_at)
+
         stage_started_at = perf_counter()
         try:
             answer = self.generator.generate(
@@ -106,28 +116,34 @@ class RAGService:
                 passages=reranked_results,
             )
         except RuntimeError as exc:
-            _record_stage("generate", stage_started_at)
             error = (
                 "generation_circuit_open" if isinstance(exc, GroqCircuitOpen) else "generation_failed"
             )
-            ERRORS.labels(type=error).inc()
             logger.warning(
                 error,
                 extra={"error_type": type(exc.__cause__ or exc).__name__},
             )
-            return {
-                "answer": None,
-                "error": error,
-                "citations": reranked_results,
-                "latency_ms": _elapsed_ms(started_at),
-            }
-        _record_stage("generate", stage_started_at)
+            return _passages_only(error, reranked_results, started_at)
+        finally:
+            _record_stage("generate", stage_started_at)
+
+        if answer == INSUFFICIENT_EVIDENCE:
+            return _passages_only("insufficient_evidence", reranked_results, started_at)
+        if not has_returned_citations(answer, reranked_results):
+            return _passages_only("invalid_answer_citations", reranked_results, started_at)
 
         return {
             "answer": answer,
             "citations": reranked_results,
             "latency_ms": _elapsed_ms(started_at),
         }
+
+
+def _passages_only(error: str, passages: list[dict], started_at: float) -> dict:
+    ERRORS.labels(type=error).inc()
+    return {
+        "answer": None, "error": error, "citations": passages, "latency_ms": _elapsed_ms(started_at),
+    }
 
 
 def _elapsed_ms(started_at: float) -> float:

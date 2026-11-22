@@ -25,9 +25,9 @@
 | P4 | Measure query embedding LRU, reranker batching and Uvicorn workers individually | Done | Baseline plus three isolated variants, 12 load cases |
 | P4 | Keep clear gains with identical top 10 on 200 queries | Done | Opt-in batch size 8, with exact ordered [baseline](../eval/results/20261122-p4-parity-baseline/metrics.json) and [batch-size-8](../eval/results/20261122-p4-parity-batch8/metrics.json) parity on all 200 queries |
 | P4 | Commit measured results under `eval/results/` without rerunning accuracy evaluation | Done | Load and parity artifacts linked above. Parity uses the saved v3 evaluation output. |
-| P5 | Strip or flag claims without citations to returned passage IDs | Todo | — |
-| P5 | Tune low-confidence abstention on TUNE only and report abstention rate and tune MRR impact | Todo | — |
-| P5 | Report faithfulness spot check on 30 queries with manual labels from official qrels | Todo | — |
+| P5 | Strip or flag claims without citations to returned passage IDs | Done | Claim lines with invalid citation structure or IDs return passages only with a reason. Covered by unit and mocked-provider tests. |
+| P5 | Tune low-confidence abstention on TUNE only and report abstention rate and tune MRR impact | Done | [500-query calibration](../eval/results/20261122-p5-tune/metrics.json). The opt-in cutoff abstained on 2.2% for an effective MRR@10 decrease of 0.00895. |
+| P5 | Report faithfulness spot check on 30 queries with manual labels from official qrels | Done (offline) | [Reviewed excerpts](../eval/results/20261122-p5-faithfulness/per_query.jsonl) and [summary](../eval/results/20261122-p5-faithfulness/metrics.json). Official qrels supply retrieval relevance. Manual labels assess source support and responsiveness. Live Groq quality remains unmeasured. |
 | P6 | CI coverage gate and measured coverage | Todo | — |
 | P6 | Strict mypy and Ruff where passing | Todo | — |
 | P6 | CI Docker build, start, readiness and one query with mocked Groq | Todo | — |

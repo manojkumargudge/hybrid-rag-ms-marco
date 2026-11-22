@@ -21,7 +21,7 @@ from app.retrieval import dense_retriever
 
 
 def _no_llm(self, query, passages):
-    return "[generation disabled for parity check]"
+    return f"Generation disabled for parity check. [pid:{passages[0]['passage_id']}]"
 
 
 def benchmark_app():

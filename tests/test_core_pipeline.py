@@ -47,7 +47,7 @@ def _service(rerank_depth=20, rerank_top_k=5, candidates=None):
         [passage(1), passage(2)] if candidates is None else candidates
     )
     reranker.rerank.return_value = [passage(2)]
-    generator.generate.return_value = "grounded answer"
+    generator.generate.return_value = "grounded answer [pid:2]"
     service = RAGService(retriever, reranker, generator,
                          rerank_depth=rerank_depth, rerank_top_k=rerank_top_k)
     return service, retriever, reranker, generator
@@ -63,7 +63,7 @@ def test_rag_service_forwards_top_k_and_returns_latency():
         query="query", passages=retriever.retrieve.return_value, top_k=1
     )
     generator.generate.assert_called_once_with(query="query", passages=[passage(2)])
-    assert result["answer"] == "grounded answer"
+    assert result["answer"] == "grounded answer [pid:2]"
     assert result["citations"] == [passage(2)]
     assert result["latency_ms"] >= 0
 
