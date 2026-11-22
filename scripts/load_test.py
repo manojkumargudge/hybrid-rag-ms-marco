@@ -21,6 +21,7 @@ from threading import Event, Thread
 import httpx
 
 from app.artifacts import sha256_file
+from app.config import Settings
 
 REFERENCE = Path("eval/results/20261118-v3-0d90c58/per_query.jsonl")
 VARIANTS = {
@@ -31,6 +32,15 @@ VARIANTS = {
 }
 CLIENT_COUNTS = (1, 5, 20)
 BENCHMARK_KEY = "local-benchmark"
+
+
+def model_environment() -> dict[str, str]:
+    return {
+        field.upper(): Settings.model_fields[field].default
+        for field in (
+            "embedding_model", "embedding_model_revision", "reranker_model", "reranker_model_revision"
+        )
+    }
 
 
 def percentile(samples: list[float], fraction: float) -> float | None:
@@ -131,6 +141,7 @@ def run_variant(name: str, workloads: dict[int, list[str]], rows: list[dict], th
         root = Path(directory)
         env = {
             **os.environ,
+            **model_environment(),
             "API_KEY": BENCHMARK_KEY, "GROQ_API_KEY": "offline-benchmark",
             "RETRIEVAL_MODE": "dense", "RERANK_DEPTH": "20", "RATE_LIMIT_PER_MIN": "0",
             "MAX_CONCURRENT_QUERIES": "2", "TRUSTED_HOSTS": "127.0.0.1",
@@ -255,6 +266,7 @@ def main() -> None:
         },
         "reference": REFERENCE.as_posix(), "reference_sha256": sha256_file(REFERENCE),
         "trusted_manifest_sha256": sha256_file(Path("manifests/v3.json")),
+        "models": model_environment(),
         "requests_per_load": args.requests if workloads else 0,
         "warmup_requests": 10 if workloads else 0, "top_k": 10,
         "backoff_after_429_seconds": 1,
@@ -266,7 +278,7 @@ def main() -> None:
     }
     baseline = None
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    variants = args.variant or VARIANTS
+    variants = sorted(args.variant or VARIANTS, key=lambda name: name != "baseline")
     for name in variants:
         result = run_variant(name, workloads, rows, args.threads)
         rankings = result.pop("top10_by_qid")

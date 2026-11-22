@@ -299,7 +299,8 @@ an offline model-load check and a container smoke test. Dependencies are pinned 
 ## Performance benchmark
 
 Run from the repository root with the published v3 artifacts and both pinned model snapshots
-already cached. The benchmark starts Uvicorn on loopback, loads the real CPU models and
+already cached. The benchmark starts Uvicorn on loopback, pins both model revisions and
+the CPU device independently of local model overrides, and loads the real models and
 FAISS index, and sends authenticated `POST /api/v1/query` requests. Generation is stubbed
 and Hugging Face runs offline. The benchmark sets dense retrieval, rerank depth 20, and
 `top_k=10`. It keeps the per-worker admission cap at 2 and disables the per-minute rate

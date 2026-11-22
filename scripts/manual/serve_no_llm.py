@@ -9,13 +9,15 @@ Both replace GroqGenerator.generate, so no Groq calls are made.
 
 import os
 import sys
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 
 import uvicorn
 
 from app.generation.groq_generator import GroqGenerator
 from app.main import app
+from app.reranking import cross_encoder_reranker
+from app.retrieval import dense_retriever
 
 
 def _no_llm(self, query, passages):
@@ -27,6 +29,8 @@ def benchmark_app():
     import torch
 
     GroqGenerator.generate = _no_llm
+    dense_retriever.SentenceTransformer = partial(dense_retriever.SentenceTransformer, device="cpu")
+    cross_encoder_reranker.CrossEncoder = partial(cross_encoder_reranker.CrossEncoder, device="cpu")
     get_service = app.state.get_rag_service
     torch.set_num_threads(int(os.environ["OMP_NUM_THREADS"]))
     ready = Path(os.environ["BENCHMARK_READY_DIR"]) / f"{os.getpid()}.ready"

@@ -3,6 +3,15 @@ import httpx
 from scripts import load_test
 
 
+def test_benchmark_model_pins_ignore_environment_overrides(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_MODEL", "other-model")
+    monkeypatch.setenv("RERANKER_MODEL_REVISION", "other-revision")
+    models = load_test.model_environment()
+    assert models["EMBEDDING_MODEL"] == "sentence-transformers/all-MiniLM-L6-v2"
+    assert models["RERANKER_MODEL_REVISION"] == "233902d25c440f23af6f7d6e94d2946bac0bee0a"
+    assert len(models) == 4
+
+
 def test_load_report_distinguishes_successful_throughput_from_rejections(monkeypatch):
     backoffs = []
 
