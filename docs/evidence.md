@@ -26,8 +26,10 @@
 - The Dockerfile pins the same Python base digest used in the
   [validated P7 build](https://github.com/manojkumargudge/hybrid-rag-ms-marco/actions/runs/45001629648/job/137144228629).
 - Gitleaks scans the tracked tree at the checkout SHA with redacted output.
-  Git history, operators' local files, and external secret stores are outside
-  that scan. The Bandit pickle exceptions remain scoped and time-limited.
+  The [allowlist](../.github/gitleaks-release.toml) matches only the exact
+  public BM25 checksums in their recorded files and one synthetic wrong-key
+  test value. Git history, operators' local files, and external secret stores
+  are outside that scan. The Bandit pickle exceptions remain scoped and time-limited.
 - Outstanding production checks include GHCR access and package creation,
   private pull-by-digest, live Groq, hybrid containers, TLS and gateway setup,
   source artifact rebuilds, sustained resource use, and production traffic.

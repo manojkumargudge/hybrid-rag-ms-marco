@@ -1,0 +1,29 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Published v2 BM25 corpus digest"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = ['''(^|[\\/])manifests[\\/]v2\.json$''']
+regexes = ['''^\s*"bm25/tokenized_corpus\.pkl": "b15732db82a1e983f549b42b7da80c1d1864e81f8484073b2e4effc703a98326",?\s*$''']
+
+[[allowlists]]
+description = "Published v3 BM25 corpus digest and its recorded evaluation copies"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''(^|[\\/])manifests[\\/]v3\.json$''',
+  '''(^|[\\/])eval[\\/]results[\\/](20261118-v3-0d90c58|20261117-v3-fd444be)[\\/]metrics\.json$''',
+]
+regexes = ['''^\s*"bm25/tokenized_corpus\.pkl": "6d792e79e3c8edf0320fd8e6670329f3a240a0e46f1232c07e4d2979baaf4258",?\s*$''']
+
+[[allowlists]]
+description = "Synthetic wrong-key value in the log privacy regression"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(^|[\\/])tests[\\/]test_hardening\.py$''']
+regexes = ['''^wrong-secret-key-123$''']
