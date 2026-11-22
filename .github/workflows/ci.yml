@@ -68,3 +68,5 @@ jobs:
         run: python -m scripts.fetch_artifacts --dense-only
       - name: Exercise the offline container and verify shutdown
         run: python -m scripts.docker_smoke --image hybrid-rag:ci
+      - name: Rehearse a failed deployment and rollback with Compose
+        run: bash scripts/operations_smoke.sh hybrid-rag:ci

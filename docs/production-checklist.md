@@ -33,14 +33,14 @@
 | P6 | CI Docker build, start, readiness and one query with mocked Groq | Done | [Reproducible smoke commands](../README.md#offline-docker-smoke-test). Pinned offline models, verified dense v3 artifacts, four ranking checks, SIGTERM drain, and two startup failure cases. |
 | P6 | OpenAPI export and drift test | Done | [Schema snapshot](openapi.json) and live endpoint comparison in pytest. |
 | P6 | Document 400, 401, 422, 429 and 503 error shapes | Done | [API response examples](../README.md#api) include error details and response headers. |
-| P7 | Slim non-root image and HEALTHCHECK | Todo | — |
-| P7 | GHCR push on main, `v1.0.0` tag and changelog | Todo | — |
-| P7 | Production Compose with limits and complete `.env.example` | Todo | — |
-| P7 | Runbook for startup, API and Groq key rotation, index rebuild, rollback and common errors | Todo | — |
-| P7 | Mermaid architecture diagram | Todo | — |
-| P7 | ADRs for dense + rerank over hybrid, 150k-passage subset and v3 corpus | Todo | — |
-| P7 | Document 150k-passage subset versus the 8.8M corpus, CPU latency, in-memory limits and single-node operation | Todo | — |
-| P7 | Verify every README step in a separate fresh clone, record times and gaps, and fix README | Todo | — |
+| P7 | Slim non-root image and HEALTHCHECK | Done | Existing Dockerfile. Health check exercised by the linked P6 Docker job in the deployment guide. |
+| P7 | GHCR push on main, `v1.0.0` tag and changelog | Deferred | Release publication remains outside this stacked operations PR. |
+| P7 | Production Compose with limits and complete `.env.example` | Done | `compose.operations.yml` uses the existing runtime env template, a selected image, loopback publication, and read-only release artifacts. |
+| P7 | Runbook for startup, API and Groq key rotation, index rebuild, rollback and common errors | Done | [Deployment](deployment.md), [rollback](rollback.md), and [incident response](operations.md). The CI rehearsal exercises failed readiness and rollback with a deterministic provider stub. |
+| P7 | Mermaid architecture diagram | Done | Existing [architecture diagram](../README.md#architecture). |
+| P7 | ADRs for dense + rerank over hybrid, 150k-passage subset and v3 corpus | Deferred | Separate decision records are outside the operations runbook scope. The README retains the measured configuration rationale. |
+| P7 | Document 150k-passage subset versus the 8.8M corpus, CPU latency, in-memory limits and single-node operation | Done | [Deployment](deployment.md), [monitoring](operations.md), and [CPU benchmark](../README.md#performance-benchmark). |
+| P7 | Verify every README step in a separate fresh clone, record times and gaps, and fix README | Partial | Hosted CI covers artifact retrieval, Docker smoke, and the operations rehearsal in a fresh checkout. The full README workflow, source artifact rebuild, and production cutover remain unverified. |
 | P8 | Map each README claim to code or results in `docs/evidence.md` | Todo | — |
 | P8 | Reconcile README with `eval/results/20261118-v3-0d90c58` and report served MRR@10 0.779 on a 150k-passage subset | Todo | — |
 | P8 | Final report of completed items, skips and known risks | Todo | — |
