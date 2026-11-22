@@ -83,11 +83,15 @@ def fetch_file(base_url: str, key: str, expected_sha: str, dest: Path) -> str:
     return "downloaded"
 
 
-def fetch(dest: Path, base_url: str, manifest_path: Path) -> list[tuple[str, str]]:
+def fetch(
+    dest: Path, base_url: str, manifest_path: Path, *, dense_only: bool = False,
+) -> list[tuple[str, str]]:
     committed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    files = committed["files"]
+    keys = ("dense_index.faiss", "passages.parquet") if dense_only else sorted(files)
     results = []
-    for key, expected in sorted(committed["files"].items()):
-        results.append((key, fetch_file(base_url, key, expected, dest)))
+    for key in keys:
+        results.append((key, fetch_file(base_url, key, files[key], dest)))
 
     manifest_target = dest / "manifest.json"
     if manifest_target.exists():
@@ -114,13 +118,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dest", type=Path, default=ROOT / "artifacts" / "v3")
+    parser.add_argument("--dense-only", action="store_true",
+                        help="Fetch only the dense serving artifacts and manifest")
     parser.add_argument("--base-url",
                         default=f"https://github.com/{REPO}/releases/download/{TAG}")
     parser.add_argument("--manifest", type=Path, default=ROOT / "manifests" / "v3.json")
     args = parser.parse_args()
 
     try:
-        for key, status in fetch(args.dest, args.base_url.rstrip("/"), args.manifest):
+        for key, status in fetch(
+            args.dest, args.base_url.rstrip("/"), args.manifest, dense_only=args.dense_only,
+        ):
             print(f"{status:10} {key}")
     except VerificationError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

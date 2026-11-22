@@ -7,7 +7,10 @@ import pytest
 
 from scripts.fetch_artifacts import VerificationError, fetch
 
-FILES = {"passages.parquet": b"passages", "bm25/bm25_index.pkl": b"pickle-bytes"}
+FILES = {
+    "passages.parquet": b"passages", "dense_index.faiss": b"faiss",
+    "bm25/bm25_index.pkl": b"pickle-bytes",
+}
 
 
 def _sha(data: bytes) -> str:
@@ -32,10 +35,18 @@ def test_downloads_and_verifies_everything(release):
     base, committed, _, dest = release
     results = dict(fetch(dest, base, committed))
     assert results == {"bm25/bm25_index.pkl": "downloaded", "passages.parquet": "downloaded",
-                       "manifest.json": "downloaded"}
+                       "dense_index.faiss": "downloaded", "manifest.json": "downloaded"}
     assert (dest / "bm25/bm25_index.pkl").read_bytes() == b"pickle-bytes"
     # Re-run is idempotent: verified files are kept, not re-downloaded.
     assert set(dict(fetch(dest, base, committed)).values()) == {"kept"}
+
+
+def test_dense_only_fetches_just_startup_inputs_and_complete_manifest(release):
+    base, committed, assets, dest = release
+    (assets / "bm25_index.pkl").unlink()
+    results = dict(fetch(dest, base, committed, dense_only=True))
+    assert set(results) == {"dense_index.faiss", "passages.parquet", "manifest.json"}
+    assert json.loads((dest / "manifest.json").read_text()) == json.loads(committed.read_text())
 
 
 def test_tampered_asset_is_refused_and_not_left_behind(release):

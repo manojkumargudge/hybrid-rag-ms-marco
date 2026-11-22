@@ -8,7 +8,7 @@ _PASSAGE_ID = re.compile(r"\[pid:([0-9]+)\]")
 _SENTENCE_BREAK = re.compile(r"""[.!?]["'”’)]*\s+""")
 
 
-def has_returned_citations(answer: str, passages: list[dict]) -> bool:
+def has_returned_citations(answer: str, passages: list[dict[str, object]]) -> bool:
     allowed = {str(passage["passage_id"]) for passage in passages}
     lines = [line.strip() for line in answer.splitlines() if line.strip()]
     if not lines:
