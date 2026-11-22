@@ -10,9 +10,12 @@ class CrossEncoderReranker:
         self,
         model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
         model_revision: str | None = None,
+        *,
+        batch_size: int | None = None,
     ) -> None:
         self.model_name = model_name
         self.model = CrossEncoder(model_name, revision=model_revision)
+        self.predict_options = {} if batch_size is None else {"batch_size": batch_size}
 
     def rerank(
         self,
@@ -48,7 +51,7 @@ class CrossEncoderReranker:
             for passage in passages
         ]
 
-        scores = self.model.predict(pairs)
+        scores = self.model.predict(pairs, **self.predict_options)
 
         reranked = []
 

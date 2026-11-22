@@ -20,11 +20,11 @@
 | P3 | Docker Compose CPU and memory limits | Done | `docker-compose.yml` has 2 CPU and 4 GiB defaults and a 45 s stop grace period. Compose configuration validated. |
 | P3 | Fuzz bad inputs and assert no 500 | Done | `tests/test_reliability.py` covers malformed JSON, non-finite numbers, invalid UTF-8, and invalid field values. |
 | P3 | Keep in-memory rate limiter, document Redis for multiple workers and assess optional Redis support | Done | [README scaling](../README.md#operations) assesses shared Redis quotas, atomicity, expiration, and outage handling. |
-| P4 | `scripts/load_test.py` exercises served dense + rerank (20) only | Todo | — |
-| P4 | Report p50/p95/p99, requests/s at 1, 5 and 20 clients, memory and cold start | Todo | — |
-| P4 | Measure query embedding LRU, reranker batching and Uvicorn workers individually | Todo | — |
-| P4 | Keep clear gains with identical top 10 on 200 queries | Todo | — |
-| P4 | Commit measured results under `eval/results/` without rerunning accuracy evaluation | Todo | — |
+| P4 | `scripts/load_test.py` exercises served dense + rerank (20) only | Done | Real FastAPI, FAISS, and pinned CPU models with offline generation stub |
+| P4 | Report p50/p95/p99, requests/s at 1, 5 and 20 clients, memory and cold start | Done | [Raw load results](../eval/results/20261122-p4-windows/metrics.json) and [methodology](../README.md#performance-benchmark) |
+| P4 | Measure query embedding LRU, reranker batching and Uvicorn workers individually | Done | Baseline plus three isolated variants, 12 load cases |
+| P4 | Keep clear gains with identical top 10 on 200 queries | Done | Opt-in batch size 8, with exact ordered [baseline](../eval/results/20261122-p4-parity-baseline/metrics.json) and [batch-size-8](../eval/results/20261122-p4-parity-batch8/metrics.json) parity on all 200 queries |
+| P4 | Commit measured results under `eval/results/` without rerunning accuracy evaluation | Done | Load and parity artifacts linked above. Parity uses the saved v3 evaluation output. |
 | P5 | Strip or flag claims without citations to returned passage IDs | Todo | — |
 | P5 | Tune low-confidence abstention on TUNE only and report abstention rate and tune MRR impact | Todo | — |
 | P5 | Report faithfulness spot check on 30 queries with manual labels from official qrels | Todo | — |

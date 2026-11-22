@@ -130,6 +130,7 @@ def create_rag_service() -> RAGService:
     reranker = CrossEncoderReranker(
         model_name=settings.reranker_model,
         model_revision=settings.reranker_model_revision,
+        batch_size=settings.rerank_batch_size,
     )
 
     generator = GroqGenerator(

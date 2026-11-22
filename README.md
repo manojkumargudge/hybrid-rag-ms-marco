@@ -259,6 +259,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `RERANKER_MODEL` / `RERANKER_MODEL_REVISION` | `cross-encoder/ms-marco-MiniLM-L-6-v2` @ `233902d2…` | Cross-encoder (pinned commit) |
 | `RETRIEVAL_MODE` | `dense` | `dense` or `hybrid` |
 | `RERANK_DEPTH` | `20` | Candidates the cross-encoder reranks |
+| `RERANK_BATCH_SIZE` | unset | Optional per-query cross-encoder batch size. Unset uses the model library default. |
 | `RERANK_TOP_K` | `5` | Fallback for direct service calls that omit `top_k`. The HTTP API defaults to 5 independently. |
 | `RETRIEVAL_K` | `20` | Hybrid only: candidates from each retriever before fusion |
 | `RRF_K` | `60` | Hybrid only: RRF constant |
@@ -294,6 +295,64 @@ CI runs lint, the tests, a lockfile-drift check, a security audit (below), a Doc
 an offline model-load check and a container smoke test. Dependencies are pinned in
 `requirements.txt` / `requirements-dev.txt` and hash-locked for Linux in `requirements*.lock`
 (regenerate with `scripts/lock_deps.sh`).
+
+## Performance benchmark
+
+Run from the repository root with the published v3 artifacts and both pinned model snapshots
+already cached. The benchmark starts Uvicorn on loopback, loads the real CPU models and
+FAISS index, and sends authenticated `POST /api/v1/query` requests. Generation is stubbed
+and Hugging Face runs offline. The benchmark sets dense retrieval, rerank depth 20, and
+`top_k=10`. It keeps the per-worker admission cap at 2 and disables the per-minute rate
+limit for this local run so 429s measure saturation.
+
+```bash
+python -m pip install psutil==7.0.0
+python -m scripts.load_test --output eval/results/local-p4/metrics.json --requests 40 --threads 4 --parity-queries 0
+python -m scripts.load_test --output eval/results/local-p4-parity/metrics.json --threads 4 --parity-only --variant baseline --variant reranker-batch-8
+```
+
+The matrix varies one setting at a time from the baseline of one worker, uncached
+embeddings, and the library's reranker batch size of 32. The alternatives use a
+256-entry embedding LRU, batch size 8 for the 20 reranking candidates, or two Uvicorn
+workers. All settings are confined to the benchmark process.
+
+For each configuration, the harness warms up with ten requests and runs 1, 5, and
+20 closed-loop clients with persistent connections. About half the requests come
+from five repeated queries. Each client waits one second after a 429 before its
+next scheduled attempt. The report separates successful throughput from attempted
+throughput and computes nearest-rank p50/p95/p99 on successful HTTP responses. It
+samples the sum of process-tree RSS every 100 ms, so shared pages can be counted
+more than once. Cold start runs from process launch to all workers initialized and a
+successful readiness response, with model and filesystem caches left in place.
+Parity checks use saved rankings with no accuracy evaluation rerun.
+
+The recorded CPU run used an Intel Core i5-1235U laptop (10 cores, 12 logical CPUs,
+15.73 GiB RAM, Windows build 26200), Python 3.11.9, and four Torch/OpenMP threads per
+worker. It used the published 150,000-passage MS MARCO v3 subset and the pinned
+MiniLM model revisions in `app/config.py`. The run sent 40 attempts per condition.
+
+| Configuration | Successful requests/s at 1 / 5 / 20 clients | HTTP 429 at 1 / 5 / 20 clients | Cold start | Peak load RSS |
+|---|---:|---:|---:|---:|
+| Baseline | 0.749 / 1.209 / 1.102 | 0 / 24 / 36 | 32.32 s | 1,144 MiB |
+| Embedding LRU | 0.752 / 1.318 / 1.134 | 0 / 24 / 36 | 30.18 s | 1,141 MiB |
+| Reranker batch size 8 | 1.028 / 1.720 / 1.361 | 0 / 24 / 36 | 31.46 s | 1,057 MiB |
+| Two workers | 0.746 / 1.284 / 1.271 | 0 / 19 / 32 | 33.94 s | 2,244 MiB |
+
+The [raw load results](eval/results/20261122-p4-windows/metrics.json) include p50,
+p95, p99, startup RSS, per-load memory, and attempted throughput. Every failure in
+this run was a capacity 429. The 20-client tails are descriptive only because each
+case had four to eight successful responses. Batch size 8 reduced single-client
+p50 from 1,194 ms to 929 ms. The LRU barely changed single-client throughput, and a
+second worker nearly doubled peak memory and raised successful-request latency at
+5 and 20 clients.
+
+`RERANK_BATCH_SIZE=8` is available as an opt-in. It passes the same batch-size
+argument used by the timed experiment, with the served candidate count and API
+contract unchanged. The final opt-in produced the same ordered top 10 as the
+baseline and the saved evaluation for all 200 parity queries. The two parity runs
+record their passage IDs by query. Their startup timings are excluded from the
+load comparison. [Baseline parity](eval/results/20261122-p4-parity-baseline/metrics.json)
+and [batch-size-8 parity](eval/results/20261122-p4-parity-batch8/metrics.json).
 
 ## Operations
 

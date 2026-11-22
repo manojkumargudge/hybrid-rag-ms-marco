@@ -240,6 +240,20 @@ def test_dense_mode_works_without_bm25_files(client, service):
     assert response.status_code == 200, response.text
 
 
+def test_opt_in_reranker_batch_size_reaches_model(client, service, monkeypatch):
+    out, _, _ = service
+    original_predict = OverlapCrossEncoder().predict
+    predict = Mock(side_effect=lambda pairs, **_: original_predict(pairs))
+    monkeypatch.setattr(OverlapCrossEncoder, "predict", predict)
+    monkeypatch.setattr(settings, "rerank_batch_size", 8)
+    query, relevant_pid = _first_eval_query(out)
+    response = client.post("/api/v1/query", json={"query": query, "top_k": 3})
+    assert response.status_code == 200, response.text
+    assert response.json()["citations"][0]["passage_id"] == relevant_pid
+    assert predict.call_args.kwargs == {"batch_size": 8}
+    assert len(predict.call_args.args[0]) == settings.rerank_depth
+
+
 @pytest.mark.parametrize("service", ["hybrid"], indirect=True)
 def test_hybrid_ready_requires_bm25_files(client, service):
     out, _, _ = service
