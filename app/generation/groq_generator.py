@@ -1,9 +1,51 @@
 ﻿import time
+from threading import Lock
 
 from groq import APIStatusError, APITimeoutError, Groq
 
 from app.config import settings
 from app.metrics import ERRORS
+
+
+class GroqCircuitOpen(RuntimeError):
+    """The provider is cooling down or its recovery probe is in flight."""
+
+
+class GroqCircuitBreaker:
+    def __init__(self, failure_threshold: int, cooldown_seconds: float) -> None:
+        self.failure_threshold = failure_threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._lock = Lock()
+        self._generation = 0
+        self._failures = 0
+        self._retry_at: float | None = None
+        self._probing = False
+
+    def admit(self) -> int:
+        with self._lock:
+            if self._retry_at is not None:
+                if self._probing or time.monotonic() < self._retry_at:
+                    raise GroqCircuitOpen("Groq circuit is open.")
+                self._probing = True
+            return self._generation
+
+    def record(self, generation: int, *, success: bool) -> None:
+        with self._lock:
+            # Calls admitted before a state transition cannot change the new state.
+            if generation != self._generation:
+                return
+            if success:
+                self._failures = 0
+                if self._probing:
+                    self._generation += 1
+                    self._retry_at = None
+                    self._probing = False
+                return
+            self._failures += 1
+            if self._probing or self._failures >= self.failure_threshold:
+                self._generation += 1
+                self._retry_at = time.monotonic() + self.cooldown_seconds
+                self._probing = False
 
 
 class GroqGenerator:
@@ -30,11 +72,17 @@ class GroqGenerator:
             settings.groq_max_retries if max_retries is None else max_retries
         )
         self.max_retries = max(0, self.max_retries)
+        self.breaker = GroqCircuitBreaker(
+            settings.groq_breaker_failure_threshold, settings.groq_breaker_cooldown_seconds
+        )
         self.client = Groq(
             api_key=resolved_api_key,
             timeout=self.timeout_seconds,
             max_retries=0,
         )
+
+    def close(self) -> None:
+        self.client.close()
 
     def generate(
         self,
@@ -104,6 +152,16 @@ Answer:
             "max_tokens": 300,
         }
 
+        generation = self.breaker.admit()
+        success = False
+        try:
+            answer = self._complete(request)
+            success = True
+            return answer
+        finally:
+            self.breaker.record(generation, success=success)
+
+    def _complete(self, request: dict) -> str:
         # Bounded retries: each attempt gets min(GROQ_TIMEOUT_SECONDS, time
         # left before GENERATION_DEADLINE_SECONDS); no retry or backoff sleep
         # may cross the deadline.
@@ -128,9 +186,9 @@ Answer:
                     raise RuntimeError("LLM generation deadline exceeded.") from exc
                 time.sleep(backoff)
 
-        answer = response.choices[0].message.content
+        answer = response.choices[0].message.content if response.choices else None
 
-        if not answer:
+        if not answer or not answer.strip():
             raise RuntimeError(
                 "LLM returned an empty response."
             )

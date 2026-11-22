@@ -2,7 +2,7 @@ from logging import getLogger
 from time import perf_counter
 from typing import Protocol
 
-from app.generation.groq_generator import GroqGenerator
+from app.generation.groq_generator import GroqCircuitOpen, GroqGenerator
 from app.metrics import ERRORS, STAGE_LATENCY
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
 
@@ -106,18 +106,18 @@ class RAGService:
                 passages=reranked_results,
             )
         except RuntimeError as exc:
-            # The generator raises RuntimeError after its bounded retries
-            # (timeouts, connection errors, 429/5xx) or on an empty reply.
-            # Degrade: return the passages without an answer instead of 5xx.
             _record_stage("generate", stage_started_at)
-            ERRORS.labels(type="generation_failed").inc()
+            error = (
+                "generation_circuit_open" if isinstance(exc, GroqCircuitOpen) else "generation_failed"
+            )
+            ERRORS.labels(type=error).inc()
             logger.warning(
-                "generation_failed",
+                error,
                 extra={"error_type": type(exc.__cause__ or exc).__name__},
             )
             return {
                 "answer": None,
-                "error": "generation_failed",
+                "error": error,
                 "citations": reranked_results,
                 "latency_ms": _elapsed_ms(started_at),
             }

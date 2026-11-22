@@ -100,14 +100,15 @@ flowchart TD
     R --> G[Groq LLM<br/>question + reranked passages]
     G --> A([answer + citations + latency_ms])
 
-    M[(artifacts/v3<br/>manifest.json sha256)] -.verified before load.-> D
+    M[(manifests/v3.json<br/>trusted SHA-256)] -.verified before load.-> D
     M -.verified before unpickling.-> H
 ```
 
-When the query service first initializes, it checks the passage file and FAISS index against
-`manifest.json`. Hybrid mode also checks both BM25 pickles before unpickling them. If a
-required file is missing or fails verification during initialization, the query endpoint
-returns 503. The initialized service is cached in each process.
+At startup each worker checks the passage file and FAISS index SHA-256 against both the
+mounted build manifest and the committed `manifests/v3.json`. Hybrid mode also checks both
+BM25 pickles and deserializes the verified bytes. A missing required artifact or digest
+mismatch prevents the worker from serving traffic. The container includes the trusted
+manifest in the image. Keep the host artifact files immutable while a worker starts.
 
 ## API
 
@@ -117,7 +118,7 @@ returns 503. The initialized service is cached in each process.
 | `GET` | `/metadata` | `X-API-Key` | Model names, artifact versions, retrieval mode, rerank depth |
 | `GET` | `/metrics` | `X-API-Key` | Prometheus metrics (see [Operations](#operations)) |
 | `GET` | `/health` | open | Liveness |
-| `GET` | `/ready` | open | Checks required artifacts and initializes the configured models |
+| `GET` | `/ready` | open | Reports whether the worker can serve queries |
 | `GET` | `/docs`, `/openapi.json` | open | Swagger UI and the OpenAPI schema |
 
 **Authentication is the default for every path.** Only `/health`, `/ready`, `/docs` and
@@ -150,12 +151,14 @@ Response shape:
 }
 ```
 
-If the LLM still fails after its retries, the response is **200 with the reranked passages**,
-`"answer": null` and `"error": "generation_failed"`, not a 5xx.
+If generation fails or the Groq circuit is open, the response is **200 with the reranked
+passages**, `"answer": null` and an `error` of `generation_failed` or
+`generation_circuit_open`.
 
 Errors: 400 invalid query, 401 missing or invalid API key, 422 validation error (including a
-query over `MAX_QUERY_CHARS`), 429 rate limited (`Retry-After: 60`), 500 unexpected pipeline
-error, 502 unexpected non-LLM runtime failure, 503 artifacts missing or failing verification.
+query over `MAX_QUERY_CHARS`), 429 rate limited (`Retry-After: 60`) or at query capacity
+(`Retry-After: 1`), 500 unexpected pipeline error, 502 unexpected non-LLM runtime failure,
+and 503 service unavailable or draining.
 
 ## Quick start (Docker Compose)
 
@@ -211,7 +214,9 @@ python -m scripts.verify_artifacts                       # sha256 + row-count ch
 Seed 42, the sampling rules and the pinned model revisions are recorded in
 `artifacts/v3/manifest.json` (committed copy: [`manifests/v3.json`](manifests/v3.json)). The
 data preparation and index scripts require `--force` to overwrite existing outputs. The FAISS index of a rebuild may not be
-byte-identical on different CPUs; `fetch_artifacts.py` gives the exact published files.
+byte-identical on different CPUs. Use `fetch_artifacts.py` for the exact published files.
+To serve a reviewed rebuild, set `TRUSTED_MANIFEST_PATH` to an independently managed copy of
+its manifest. Keep that reference outside the artifact directory and under deployer control.
 
 ### Reproduce the evaluation
 
@@ -294,12 +299,17 @@ an offline model-load check and a container smoke test. Dependencies are pinned 
 
 **Probes.**
 - `/health` returns 200 for valid hosts while the process serves.
-- `/ready` returns 200 when both keys are configured, the required files exist, and the query
-  service has initialized successfully. Initialization checks SHA-256 and loads the embedding
-  and reranker models. BM25 files are required only in hybrid mode. The first successful
-  initialization is reused by queries and later probes in that worker. A failed check returns
-  503, and subsequent probes can retry initialization. Readiness sends no Groq API request.
-  Neither probe requires client authentication or counts against the rate limit.
+- `/ready` returns 200 when both keys are configured, the required files exist, and the
+  initialized worker is accepting queries. Startup verifies SHA-256 and loads both models
+  before accepting HTTP traffic. A failed readiness check returns 503. Probes are public
+  and rate-limit exempt. Readiness sends no Groq request and stays healthy during a provider outage.
+
+**Concurrency and shutdown.** A worker admits up to `MAX_CONCURRENT_QUERIES` validated queries
+(default 2) at a time. Excess queries receive 429 with `Retry-After: 1`. The app returns 503
+if it receives a query while draining. On SIGTERM, Uvicorn stops accepting connections and
+drains in-flight requests before the app closes the Groq client and releases the pipeline.
+Compose gives the process 45 seconds before a forced stop and defaults to 2 CPUs and 4 GiB of
+memory. Override the limits with `API_CPUS` and `API_MEMORY_LIMIT`.
 
 **Logs.** The app's default logging handler writes one JSON object per line to stderr, with `timestamp`, `level`, `logger`, `message`,
 `request_id` and `key_id`, plus context fields such as `method`, `path`, `status_code`,
@@ -323,7 +333,7 @@ Example:
 | Metric | Type | Labels |
 |---|---|---|
 | `rag_stage_latency_seconds` | histogram | `stage` = `retrieve`, `rerank`, `generate` |
-| `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `service_unavailable`, `invalid_request`, `generation_failed`, `groq_timeout`, `pipeline_error` |
+| `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `query_capacity_exceeded`, `service_unavailable`, `invalid_request`, `generation_failed`, `generation_circuit_open`, `groq_timeout`, `pipeline_error` |
 | `http_requests_total` | counter | `status` |
 | `http_request_duration_seconds` | histogram | None |
 
@@ -357,13 +367,20 @@ the proxy's address.
   before starting an attempt or sleeping for backoff.
 - If generation still fails, the API returns the reranked passages with `answer: null`,
   `error: "generation_failed"`, and increments `rag_errors_total{type="generation_failed"}`.
+- After `GROQ_BREAKER_FAILURE_THRESHOLD` consecutive failed generations (default 3),
+  the worker skips Groq for `GROQ_BREAKER_COOLDOWN_SECONDS` (default 30). Skipped requests
+  return HTTP 200 with the same reranked passages, `answer: null`, and
+  `error: "generation_circuit_open"`. One request probes Groq after the cooldown.
+  Success restores generation and failure starts a fresh cooldown.
 
 **Scaling: the limiter is in-memory, per process.** Each uvicorn worker and each container
 keeps its own counters. With N workers or instances, a key can make up to N ×
 `RATE_LIMIT_PER_MIN` requests per minute. Multi-worker or multi-instance deployments need a
-shared store such as **Redis** for the limiter. Metrics are also per process, so each
-worker/instance needs an individually addressable scrape target. The app uses an in-process
-Prometheus registry.
+shared store such as **Redis** for a global quota. An optional Redis backend would need
+atomic quota updates, key expiration and explicit handling of Redis outages. The single-worker
+deployment uses the existing in-memory limiter. Query concurrency and circuit state also
+apply per process. Each worker or instance needs its own scrape target because the
+Prometheus registry is local to the process.
 
 ## Security
 
@@ -381,7 +398,7 @@ Accepted findings and workarounds, each with its reason:
 
 | Tool | Finding | Where | Decision and reason |
 |---|---|---|---|
-| bandit | B301, pickle deserialization (medium) | `app/retrieval/bm25_retriever.py`, both `pickle.load` calls | **Two scoped exceptions in [the security ignore file](.github/security-ignore.json) expire on 2026-12-31.** The BM25 index is a `rank_bm25` object stored as a pickle. Immediately before each load, `verify_artifacts` checks the file's SHA-256 against `manifest.json`, and a mismatch raises before anything is unpickled. A test covers tampered-pickle rejection. The residual risk is someone who can write both the pickle and the manifest; artifacts are mounted read-only. |
+| bandit | B301, pickle deserialization (medium) | `app/retrieval/bm25_retriever.py`, both `pickle.load` calls | **Two scoped exceptions in [the security ignore file](.github/security-ignore.json) expire on 2026-12-31.** The service checks both pickles against trusted SHA-256 digests before loading them and mounts artifacts read-only. Keep the trusted manifest and the mounted files under deployer control. |
 | bandit | B403, `import pickle` (low) | same file | Below the `-ll` gate; same reason as B301. |
 | pip-audit | `torch==2.13.0+cpu` cannot be looked up | both lockfiles | **Audited as `torch==2.13.0`.** `+cpu` is a local version from the PyTorch CPU index and isn't on PyPI. The script audits a temporary copy of each lockfile with the suffix removed (same upstream release, CPU-only build) and fails if that copy is empty or lost torch. |
 

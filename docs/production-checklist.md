@@ -14,12 +14,12 @@
 | P2 | Prometheus request count, errors, per-stage latency, Groq failures/timeouts and rate-limit hits | Done | `app/metrics.py`, retry and rate-limit assertions in `tests/test_hardening.py` |
 | P2 | Readiness verifies index and models, with BM25 only in hybrid mode | Done | `app/main.py`, artifact and model readiness checks in `tests/test_e2e_fixture.py` |
 | P2 | Document metric names in README | Done | [README operations](../README.md#operations) |
-| P3 | Graceful shutdown and concurrency limit with 429/503 backpressure | Todo | — |
-| P3 | Groq circuit breaker and flagged passage-only fallback | Todo | — |
-| P3 | Startup refuses artifact SHA-256 mismatch against `manifests/v3.json` | Todo | — |
-| P3 | Docker Compose CPU and memory limits | Todo | — |
-| P3 | Fuzz bad inputs and assert no 500 | Todo | — |
-| P3 | Keep in-memory rate limiter, document Redis for multiple workers and assess optional Redis support | Todo | — |
+| P3 | Graceful shutdown and concurrency limit with 429/503 backpressure | Done | `app/main.py`, `app/api/routes.py`, and `tests/test_reliability.py` |
+| P3 | Groq circuit breaker and flagged passage-only fallback | Done | `app/generation/groq_generator.py`, `app/rag_service.py`, and breaker and fixture tests |
+| P3 | Startup refuses artifact SHA-256 mismatch against `manifests/v3.json` | Done | Trusted `manifests/v3.json` is packaged in the image. Startup tests reject modified artifacts even if their mounted hashes were updated. |
+| P3 | Docker Compose CPU and memory limits | Done | `docker-compose.yml` has 2 CPU and 4 GiB defaults and a 45 s stop grace period. Compose configuration validated. |
+| P3 | Fuzz bad inputs and assert no 500 | Done | `tests/test_reliability.py` covers malformed JSON, non-finite numbers, invalid UTF-8, and invalid field values. |
+| P3 | Keep in-memory rate limiter, document Redis for multiple workers and assess optional Redis support | Done | [README scaling](../README.md#operations) assesses shared Redis quotas, atomicity, expiration, and outage handling. |
 | P4 | `scripts/load_test.py` exercises served dense + rerank (20) only | Todo | — |
 | P4 | Report p50/p95/p99, requests/s at 1, 5 and 20 clients, memory and cold start | Todo | — |
 | P4 | Measure query embedding LRU, reranker batching and Uvicorn workers individually | Todo | — |

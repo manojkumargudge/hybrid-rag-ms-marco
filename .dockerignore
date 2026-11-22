@@ -1,4 +1,4 @@
-# Build context only needs requirements.lock, app/ and scripts/download_models.py.
+# Build context also includes the trusted manifests/v3.json.
 .venv/
 venv/
 env/

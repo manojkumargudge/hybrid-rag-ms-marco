@@ -10,6 +10,9 @@ services:
       - .env
     volumes:
       # Artifacts are mounted, never baked into the image. Every file is
-      # sha256-checked against manifest.json before it is loaded.
+      # SHA-256 checked against the v3 manifest baked into the image.
       - ./artifacts/v3:/app/artifacts/v3:ro
+    cpus: "${API_CPUS:-2.0}"
+    mem_limit: "${API_MEMORY_LIMIT:-4g}"
+    stop_grace_period: 45s
     restart: unless-stopped

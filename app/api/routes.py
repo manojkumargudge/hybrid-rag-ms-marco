@@ -1,7 +1,10 @@
+import asyncio
 from logging import getLogger
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
+from app.config import settings
 from app.metrics import ERRORS
 from app.schemas.query import QueryRequest, QueryResponse
 
@@ -19,7 +22,7 @@ router = APIRouter(
     "/query",
     response_model=QueryResponse,
 )
-def query_rag(
+async def query_rag(
     request: Request,
     query_request: QueryRequest,
 ) -> QueryResponse:
@@ -29,6 +32,33 @@ def query_rag(
     If LLM generation fails after its retries, the response still returns the
     reranked passages, with answer=null and error set.
     """
+    state = request.app.state
+    if state.draining:
+        ERRORS.labels(type="service_unavailable").inc()
+        raise HTTPException(status_code=503, detail="RAG service is shutting down.")
+    # All admissions run on the worker's event loop without a yield between
+    # checking and incrementing. Rejected requests never enter the thread pool.
+    if len(state.query_tasks) >= settings.max_concurrent_queries:
+        ERRORS.labels(type="query_capacity_exceeded").inc()
+        raise HTTPException(
+            status_code=429,
+            detail="Query concurrency limit exceeded.",
+            headers={"Retry-After": "1"},
+        )
+    task = asyncio.create_task(run_in_threadpool(_run_query, request, query_request))
+    state.query_tasks.add(task)
+
+    def release_slot(completed: asyncio.Task) -> None:
+        state.query_tasks.discard(completed)
+        if not completed.cancelled():
+            completed.exception()  # The HTTP waiter may have been cancelled.
+
+    task.add_done_callback(release_slot)
+    # Cancelling the HTTP task cannot stop a synchronous inference call.
+    return await asyncio.shield(task)
+
+
+def _run_query(request: Request, query_request: QueryRequest) -> QueryResponse:
 
     try:
         rag_service = request.app.state.get_rag_service()

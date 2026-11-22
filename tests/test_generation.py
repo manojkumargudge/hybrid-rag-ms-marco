@@ -6,7 +6,11 @@ import pytest
 from groq import APIConnectionError, APIStatusError, APITimeoutError
 
 from app.config import Settings
-from app.generation.groq_generator import GroqGenerator
+from app.generation.groq_generator import (
+    GroqCircuitBreaker,
+    GroqCircuitOpen,
+    GroqGenerator,
+)
 
 
 def _response(text: str) -> SimpleNamespace:
@@ -23,7 +27,33 @@ def _generator(client: Mock, max_retries: int = 1, timeout: float = 10.0,
     generator.max_retries = max_retries
     generator.timeout_seconds = timeout
     generator.deadline_seconds = deadline
+    generator.breaker = GroqCircuitBreaker(3, 30)
     return generator
+
+
+def test_breaker_ignores_stale_results_and_allows_one_recovery_probe(monkeypatch):
+    from app.generation import groq_generator
+
+    now = 0.0
+    monkeypatch.setattr(groq_generator, "time", SimpleNamespace(monotonic=lambda: now))
+    breaker = GroqCircuitBreaker(failure_threshold=1, cooldown_seconds=10)
+    stale = breaker.admit()
+    breaker.record(breaker.admit(), success=False)
+    breaker.record(stale, success=True)
+    with pytest.raises(GroqCircuitOpen):
+        breaker.admit()
+
+    now = 10.0
+    probe = breaker.admit()
+    with pytest.raises(GroqCircuitOpen):
+        breaker.admit()
+    breaker.record(probe, success=False)
+    with pytest.raises(GroqCircuitOpen):
+        breaker.admit()
+
+    now = 20.0
+    breaker.record(breaker.admit(), success=True)
+    assert breaker.admit() == breaker.admit()
 
 
 def test_groq_retries_transient_timeout_and_succeeds():
