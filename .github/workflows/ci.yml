@@ -47,6 +47,8 @@ jobs:
         run: pip install pip-audit==2.10.1 bandit==1.9.4
       - name: pip-audit (lockfiles, strict) + bandit -ll (app/)
         run: sh scripts/security_audit.sh
+      - name: Scan the tracked release tree for secrets
+        run: bash scripts/scan_release_secrets.sh
 
   docker:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'

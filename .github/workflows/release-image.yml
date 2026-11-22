@@ -1,0 +1,68 @@
+name: Release image
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-image.yml
+      - scripts/check_release_image.sh
+      - scripts/publish_image.py
+      - Dockerfile
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the checked main commit to GHCR
+        type: boolean
+        default: false
+      commit_sha:
+        description: Full main commit SHA required for publishing
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && !inputs.publish)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Build and validate without publishing
+        run: bash scripts/check_release_image.sh
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'manojkumargudge/hybrid-rag-ms-marco' && inputs.publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: ghcr-release
+    concurrency:
+      group: ghcr-release-${{ github.sha }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check the requested revision
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: test "$REQUESTED_SHA" = "$GITHUB_SHA"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Build and validate the release candidate
+        run: bash scripts/check_release_image.sh
+      - name: Publish the checked image under its commit SHA
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m scripts.publish_image
