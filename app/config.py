@@ -14,7 +14,7 @@ logger = getLogger(__name__)
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
-    groq_api_key: str = ""
+    groq_api_key: str = Field(default="", repr=False)
     api_key: str = Field(default="", repr=False)
     groq_model: str = "openai/gpt-oss-120b"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -63,12 +63,14 @@ class Settings(BaseSettings):
     # requests); 0 disables. /health and /ready are never limited.
     rate_limit_per_min: int = Field(default=60, ge=0)
     max_query_chars: int = Field(default=2000, gt=0)
+    max_query_body_bytes: int = Field(default=32768, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
 

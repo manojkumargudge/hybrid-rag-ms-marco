@@ -165,6 +165,7 @@ passages**, `"answer": null` and an `error` of `generation_failed` or
 |---|---|
 | 400 | `{"detail":"Query cannot be empty."}` for a whitespace-only query |
 | 401 | `{"detail":"Invalid or missing API key."}` with `WWW-Authenticate: ApiKey` |
+| 413 | `{"detail":"Request body exceeds the byte limit."}` when the streamed query body exceeds `MAX_QUERY_BODY_BYTES` |
 | 422 | `{"detail":[{"type":"int_type","loc":["body","top_k"],"msg":"Input should be a valid integer","input":"5"}]}` for a string `top_k`. Validation entries include `loc`, `type`, and `msg`. Other fields may vary. |
 | 429 | `{"detail":"Rate limit exceeded."}` with `Retry-After: 60`, or `{"detail":"Query concurrency limit exceeded."}` with `Retry-After: 1` |
 | 503 | Query returns `{"detail":"RAG service is not ready."}` or `{"detail":"RAG service is shutting down."}`. `/ready` returns `{"status":"not_ready","service":"hybrid-rag"}`. |
@@ -281,6 +282,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `APPLICATION_VERSION` / `GIT_VERSION` | `1.0.0` / `unknown` | Reported by `/metadata` |
 | `RATE_LIMIT_PER_MIN` | `60` | Requests per minute per API key (per client IP when unauthenticated); `0` disables |
 | `MAX_QUERY_CHARS` | `2000` | Longest accepted `query`; longer gets 422 |
+| `MAX_QUERY_BODY_BYTES` | `32768` | Maximum streamed bytes for a query request, checked before JSON parsing |
 | `TRUSTED_HOSTS` | `localhost,127.0.0.1,testserver` | Allowed `Host` headers |
 | `CORS_ORIGINS` | empty | Allowed browser origins (empty = none) |
 
@@ -534,6 +536,23 @@ The CI `security` job runs [`scripts/security_audit.sh`](scripts/security_audit.
   `--require-hashes --disable-pip`.
 - **bandit** (1.9.4) on `app/` at medium severity and above (`-ll`). The gate fails on
   scanner errors, unapproved findings and expired exceptions.
+- [**Gitleaks**](scripts/scan_release_secrets.sh) scans the tracked tree and all commits reachable
+  from the CI checkout, including changes introduced by merge commits. Tracked-tree
+  exceptions match specific public checksums or synthetic data. History exceptions
+  match the exact scanner rule, path, and commit fingerprint. The job prints finding
+  metadata only.
+
+The Docker job runs [**Trivy**](scripts/scan_image_security.sh) on the same local image
+it builds and smoke-tests. Every high or critical finding blocks CI unless covered by
+a documented, unexpired exception for the exact vulnerability, target type, package,
+and installed version. Findings with a newly available fix require fresh review.
+The JSON report is retained with the CI run for 14 days.
+The Dockerfile applies Debian's [zlib security update](https://security-tracker.debian.org/tracker/DSA-6613-1).
+Current Debian exceptions and their review dates are recorded in
+[the security ignore file](.github/security-ignore.json).
+
+Dependabot checks Python, GitHub Actions, and Docker dependencies weekly. Dependency
+PRs follow the normal review and validation process.
 
 Run it locally with `pip install pip-audit==2.10.1 bandit==1.9.4 && sh scripts/security_audit.sh`.
 

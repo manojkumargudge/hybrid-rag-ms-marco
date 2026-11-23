@@ -14,9 +14,11 @@ from contextvars import ContextVar
 from logging import getLogger
 
 from fastapi.responses import JSONResponse
+from starlette._utils import get_route_path
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.auth import API_KEY_HEADER, configured_key, is_valid_key
 from app.config import settings
@@ -66,6 +68,49 @@ rate_limiter = RateLimiter()
 
 def _json_error(status_code: int, detail: str, headers: dict | None = None) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail}, headers=headers)
+
+
+class QueryBodyLimitMiddleware:
+    """Buffer at most the configured query body size before routing."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or scope["method"] != "POST"
+            or get_route_path(scope) not in {"/api/v1/query", "/api/v1/query/"}
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        # Content-Length is optional and may disagree with the ASGI stream.
+        limit = settings.max_query_body_bytes
+        body: bytearray | None = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > limit:
+                ERRORS.labels(type="query_body_too_large").inc()
+                response = _json_error(413, "Request body exceeds the byte limit.")
+                await response(scope, receive, send)
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        async def replay() -> Message:
+            nonlocal body
+            if body is None:
+                return await receive()
+            payload = bytes(body)
+            body = None
+            return {"type": "http.request", "body": payload, "more_body": False}
+
+        await self.app(scope, replay, send)
 
 
 class ProductionMiddleware(BaseHTTPMiddleware):

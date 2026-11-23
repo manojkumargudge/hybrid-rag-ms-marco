@@ -18,5 +18,263 @@
     ],
     "reason": "The optional BM25 corpus is deserialized from the exact bytes checked against SHA-256. Production also requires the independently trusted digest.",
     "expires": "2026-12-31"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "tests/test_hardening.py",
+      "b16cef56ac1e09b75d4acc402cbc53029ea92409:tests/test_hardening.py:generic-api-key:197"
+    ],
+    "reason": "Synthetic wrong-key fixture used to verify request logging redaction.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "tests/test_hardening.py",
+      "501c2db40eabfe28398101c8234825fcf14bc221:tests/test_hardening.py:generic-api-key:197"
+    ],
+    "reason": "Synthetic wrong-key fixture used to verify request logging redaction.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "curl-auth-header",
+    "scope": [
+      "README.md",
+      "b1e15b525c9d57102a0067d2d01ea168e9f075ce:README.md:curl-auth-header:159"
+    ],
+    "reason": "Documented demo placeholder in a historical localhost curl example.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "curl-auth-header",
+    "scope": [
+      "README.md",
+      "bcb707322fcb2f5b8d4aee7dd899116bacee0a1e:README.md:curl-auth-header:159"
+    ],
+    "reason": "Documented demo placeholder in a historical localhost curl example.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "curl-auth-header",
+    "scope": [
+      "README.md",
+      "5c65d04504f02f9eb8bd2a5191525fc660e8cded:README.md:curl-auth-header:180"
+    ],
+    "reason": "Documented demo placeholder in a historical localhost curl example.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "eval/results/20261118-v3-0d90c58/metrics.json",
+      "eeb5be1a82f473bb13a41e9e277af60188ef6647:eval/results/20261118-v3-0d90c58/metrics.json:generic-api-key:16"
+    ],
+    "reason": "Public SHA-256 checksum for the BM25 tokenized corpus.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "eval/results/20261118-v3-0d90c58/metrics.json",
+      "5a3d00ed81795630f6ba359c118f5a6e97f1a189:eval/results/20261118-v3-0d90c58/metrics.json:generic-api-key:16"
+    ],
+    "reason": "Public SHA-256 checksum for the BM25 tokenized corpus.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "eval/results/20261117-v3-fd444be/metrics.json",
+      "1bf2018124436da9ae247914de4c9c8414e0fc4d:eval/results/20261117-v3-fd444be/metrics.json:generic-api-key:16"
+    ],
+    "reason": "Public SHA-256 checksum for the BM25 tokenized corpus.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "manifests/v2.json",
+      "84f5f8ad72a7c9f04e2264b6ee23d2ee0c5ec38c:manifests/v2.json:generic-api-key:78"
+    ],
+    "reason": "Public SHA-256 checksum for the BM25 tokenized corpus.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "gitleaks",
+    "id": "generic-api-key",
+    "scope": [
+      "manifests/v3.json",
+      "84f5f8ad72a7c9f04e2264b6ee23d2ee0c5ec38c:manifests/v3.json:generic-api-key:84"
+    ],
+    "reason": "Public SHA-256 checksum for the BM25 tokenized corpus.",
+    "expires": "2027-02-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2025-69720",
+    "scope": [
+      "debian",
+      "libncursesw6@6.5+20250216-2",
+      "libtinfo6@6.5+20250216-2",
+      "ncurses-base@6.5+20250216-2",
+      "ncurses-bin@6.5+20250216-2"
+    ],
+    "reason": "Debian has no fix for these versions. The service does not invoke infocmp or parse terminal definitions.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-119373",
+    "scope": [
+      "debian",
+      "libsqlite3-0@3.46.1-7+deb13u2"
+    ],
+    "reason": "Debian has no fix for this version. The service uses FAISS and Parquet and cannot create or query attacker-controlled FTS5 tables.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-119374",
+    "scope": [
+      "debian",
+      "libsqlite3-0@3.46.1-7+deb13u2"
+    ],
+    "reason": "Debian has no fix for this version. The API does not accept SQLite database files or edit FTS5 indexes.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-119379",
+    "scope": [
+      "debian",
+      "libsqlite3-0@3.46.1-7+deb13u2"
+    ],
+    "reason": "Debian has no fix for this version. The API does not accept or apply SQLite changesets.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-124709",
+    "scope": [
+      "debian",
+      "libssl3t64@3.5.7-1~deb13u3",
+      "openssl@3.5.7-1~deb13u3",
+      "openssl-provider-legacy@3.5.7-1~deb13u3"
+    ],
+    "reason": "Debian has no fix for these versions. OpenSSL rates this QUIC server issue low. The image serves plain HTTP through Uvicorn and does not start a QUIC listener.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-16742",
+    "scope": [
+      "debian",
+      "libsystemd0@257.13-1~deb13u1",
+      "libudev1@257.13-1~deb13u1"
+    ],
+    "reason": "Debian has no fix for these versions. The image starts Uvicorn directly and does not run systemd-homed.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-54369",
+    "scope": [
+      "debian",
+      "libacl1@2.3.2-2+b1"
+    ],
+    "reason": "Debian has no fix for this version. The API does not perform pathname-based ACL operations or accept filesystem paths.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-76642",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "Debian has no fix for these versions. The service does not run mount helpers or configure post-mount hooks and runs as an unprivileged user.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-78408",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "Debian has no fix for these versions. The service does not invoke nsenter or migrate processes between cgroups.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-78409",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "Debian has no fix for these versions. The service does not construct mount entries or request subdirectory mounts.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-78410",
+    "scope": [
+      "debian",
+      "bsdutils@1:2.41.5-0+deb13u1",
+      "libblkid1@2.41.5-0+deb13u1",
+      "liblastlog2-2@2.41.5-0+deb13u1",
+      "libmount1@2.41.5-0+deb13u1",
+      "libsmartcols1@2.41.5-0+deb13u1",
+      "libuuid1@2.41.5-0+deb13u1",
+      "login@1:4.16.0-2+really2.41.5-0+deb13u1",
+      "mount@2.41.5-0+deb13u1",
+      "util-linux@2.41.5-0+deb13u1"
+    ],
+    "reason": "Debian has no fix for these versions. The service does not create bind mounts and runs as an unprivileged user.",
+    "expires": "2026-12-21"
+  },
+  {
+    "tool": "trivy",
+    "id": "CVE-2026-9538",
+    "scope": [
+      "debian",
+      "perl-base@5.40.1-6+deb13u1"
+    ],
+    "reason": "Debian deferred the fix for this version. The service does not invoke Perl Archive::Tar or accept archives.",
+    "expires": "2026-12-21"
   }
 ]

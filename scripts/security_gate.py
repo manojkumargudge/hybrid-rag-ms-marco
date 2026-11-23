@@ -23,7 +23,8 @@ def load_ignores(path, today):
                     for field in ("tool", "id", "reason", "expires"))
             or tool not in SCANNERS
             or not isinstance(scope, list)
-            or len(scope) != 2
+            or len(scope) < 2
+            or (tool != "trivy" and len(scope) != 2)
             or not all(isinstance(value, str) and value.strip() for value in scope)
         ):
             raise ValueError("Invalid security exception metadata.")
@@ -32,11 +33,12 @@ def load_ignores(path, today):
             raise ValueError("Use YYYY-MM-DD for security exception expiry.")
         if today > expiry:
             raise ValueError(f"Expired {tool} exception {finding_id} ({expiry})")
-        target, statement = scope
-        key = (tool, finding_id, target, statement)
-        if key in ignores:
-            raise ValueError(f"Duplicate {tool} exception {finding_id}")
-        ignores.add(key)
+        target, *items = scope
+        for item in items:
+            key = (tool, finding_id, target, item)
+            if key in ignores:
+                raise ValueError(f"Duplicate {tool} exception {finding_id}")
+            ignores.add(key)
     return ignores
 
 
@@ -51,7 +53,26 @@ def bandit_findings(report):
         yield "bandit", issue["test_id"], Path(issue["filename"]).as_posix(), code
 
 
-SCANNERS = {"bandit": bandit_findings}
+def gitleaks_findings(report):
+    if not isinstance(report, list):
+        raise TypeError("Gitleaks report must contain a list of findings.")
+    for issue in report:
+        yield "gitleaks", issue["RuleID"], issue["File"], issue["Fingerprint"]
+
+
+def trivy_findings(report):
+    if report.get("ArtifactType") != "container_image" or not report["Results"]:
+        raise ValueError("Trivy produced no image scan targets.")
+    for target in report["Results"]:
+        for issue in target.get("Vulnerabilities") or []:
+            if issue["Severity"] in {"HIGH", "CRITICAL"}:
+                package = f"{issue['PkgName']}@{issue['InstalledVersion']}"
+                if fixed := issue.get("FixedVersion"):
+                    package += f" (fix available: {fixed})"
+                yield "trivy", issue["VulnerabilityID"], target["Type"], package
+
+
+SCANNERS = {"bandit": bandit_findings, "gitleaks": gitleaks_findings, "trivy": trivy_findings}
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -73,10 +94,12 @@ def main():
             accepted = finding in ignores
             activity, finding_id, target, statement = finding
             disposition = "Accepted until expiry" if accepted else "Unapproved"
-            print(f"{disposition} {activity} finding {finding_id} in {target}: {statement}")
+            print(f"{disposition} {activity} finding {finding_id!r} in {target!r}: {statement!r}")
             unapproved += not accepted
         return int(unapproved > 0)
     except (OSError, KeyError, TypeError, ValueError) as exc:
+        if args.tool == "gitleaks":
+            parser.exit(1, "Security gate failed while reading Gitleaks metadata.\n")
         parser.exit(1, f"Security gate failed: {exc}\n")
 
 
