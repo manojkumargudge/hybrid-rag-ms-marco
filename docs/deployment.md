@@ -68,6 +68,13 @@ without shell quoting or expansion. Keep the artifact paths relative to
 `/app` as in the example. Set `TRUSTED_HOSTS` to the local and gateway hostnames
 you use. Set `CORS_ORIGINS` only if browser clients require it. Leave the
 embedded model revisions aligned with the image and the artifact manifest.
+Set `GIT_VERSION` to the full recorded source SHA for authenticated metadata.
+The template leaves both credential values blank. An empty Groq key causes
+startup to fail after local pipeline initialization. The log records
+`rag_initialization_failed` with the exception type.
+An empty API key leaves protected endpoints unavailable. A nonempty Groq key
+permits local initialization, and a controlled authenticated query is needed
+to confirm provider access.
 
 Use the same versioned file workflow for key rotation. Stage the current release
 with the new private runtime file, coordinate client updates for the API key, and

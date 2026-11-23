@@ -20,7 +20,8 @@
   and checks OpenAPI drift.
 - P7 documents single-host deployment, monitoring, incident response, and
   rollback. Hosted CI rehearses failed readiness and restores a recorded
-  image with the verified dense artifacts.
+  image with the verified dense artifacts. The GHCR publication path requires
+  full CI for the requested main SHA and an environment opt-in.
 
 The hosted validation uses offline generation. See the [release checklist](docs/release.md)
 for publication prerequisites and remaining production checks.

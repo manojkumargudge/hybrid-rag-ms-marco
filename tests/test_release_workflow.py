@@ -39,6 +39,28 @@ def test_release_workflow_keeps_registry_write_out_of_pr_runs():
     assert "&& inputs.publish" in publish["if"]
     assert publish["permissions"] == {"contents": "read", "packages": "write"}
     assert publish["environment"] == "ghcr-release"
+    enable, build, push = [
+        step for step in publish["steps"]
+        if step.get("name") in {
+            "Require publication to be enabled",
+            "Build and validate the release candidate",
+            "Publish the checked image under its commit SHA",
+        }
+    ]
+    assert enable["env"] == {"GHCR_RELEASE_ENABLED": "${{ secrets.GHCR_RELEASE_ENABLED }}"}
+    assert enable["run"] == 'test "$GHCR_RELEASE_ENABLED" = true'
+    assert build["run"] == "bash scripts/check_release_image.sh"
+    assert "GHCR_TOKEN" in push["env"]
+    gates = workflow["jobs"]["release-gates"]
+    assert publish["needs"] == "release-gates"
+    assert gates["if"] == publish["if"]
+    assert "inputs.commit_sha == github.sha" in gates["if"]
+    assert gates["uses"] == "./.github/workflows/ci.yml"
+    assert "secrets" not in gates
+    assert "permissions" not in gates
+    ci = yaml.load(WORKFLOW.with_name("ci.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert "workflow_call" in ci["on"]
+    assert {"test", "security", "docker"} <= ci["jobs"].keys()
     for job in (verify, publish):
         for step in job["steps"]:
             if "uses" in step:

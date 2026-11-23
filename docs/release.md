@@ -1,4 +1,4 @@
-# Prepare the v1.0.0 release
+# Verify the v1.0.0 release candidate
 
 ## Validate a fresh checkout
 
@@ -41,21 +41,30 @@ the distinction between hosted checks and outstanding production verification.
 These steps are for a future authorized release operator.
 
 1. Confirm the exact commit is on `main`, the required checks passed, and the
-   release notes were reviewed. Configure the GitHub `ghcr-release` environment
-   for approved main deployments and review access to the GHCR package. The
-   workflow grants package write access only to the manual publication job.
+   [draft release notes](release-notes-v1.0.0.md) were reviewed. Configure the
+   GitHub `ghcr-release` environment for main only, with required reviewers
+   and self-review disabled where supported. Review access to the GHCR
+   package. After publication is separately authorized, set
+   `GHCR_RELEASE_ENABLED` to `true` as a secret scoped to that environment.
+   Leave it unset at repository and organization level. The workflow grants
+   package write access only to the manual publication job.
 2. Dispatch **Release image** on `main` with publishing disabled for a dry run.
    Review the build and smoke results. PR runs perform the same validation
    without registry credentials.
 3. In a separately approved manual dispatch on `main`, enable `publish` and
-   supply the exact full main commit SHA. The job checks the requested SHA,
-   builds and smoke-tests the local image, then attempts to create
+   supply the exact full main commit SHA. The workflow runs the full CI jobs
+   for that revision first. The publication job then checks the requested SHA
+   and the environment opt-in, builds and smoke-tests the local image, and
+   attempts to create
    `ghcr.io/manojkumargudge/hybrid-rag-ms-marco:sha-<full-sha>`. The workflow
    refuses to overwrite this tag or proceed if registry access cannot prove
    its absence. The job records the registry digest. If a push succeeded but
    digest verification failed, inspect the package before retrying.
 4. Pull the recorded digest and verify its Docker repository digest and
-   `org.opencontainers.image.revision` label. Use the digest for deployment.
+   `org.opencontainers.image.revision` label. The
+   `org.opencontainers.image.version` label is `1.0.0`. The registry tag
+   identifies the build revision, while the version label identifies the
+   application version. Use the digest for deployment.
    The workflow guards against overwrites through this publisher. Other
    registry writers can still move tags, which is why deployment uses digests.
 5. After sign-off, create an annotated `v1.0.0` Git tag on that same SHA and
@@ -68,7 +77,7 @@ These steps are for a future authorized release operator.
 ```bash
 image='ghcr.io/manojkumargudge/hybrid-rag-ms-marco@sha256:<recorded-digest>'
 docker pull "$image"
-docker image inspect --format '{{json .RepoDigests}} {{index .Config.Labels "org.opencontainers.image.revision"}}' "$image"
+docker image inspect --format '{{json .RepoDigests}} {{index .Config.Labels "org.opencontainers.image.revision"}} {{index .Config.Labels "org.opencontainers.image.version"}}' "$image"
 ```
 
 For private packages, authenticate using the approved credential mechanism.

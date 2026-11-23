@@ -4,8 +4,16 @@ on:
   pull_request:
     paths:
       - .github/workflows/release-image.yml
+      - .dockerignore
       - scripts/check_release_image.sh
       - scripts/publish_image.py
+      - scripts/fetch_artifacts.py
+      - scripts/docker_smoke*.py
+      - scripts/download_models.py
+      - .github/workflows/ci.yml
+      - app/**
+      - manifests/v3.json
+      - requirements.lock
       - Dockerfile
   workflow_dispatch:
     inputs:
@@ -36,8 +44,13 @@ jobs:
       - name: Build and validate without publishing
         run: bash scripts/check_release_image.sh
 
+  release-gates:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'manojkumargudge/hybrid-rag-ms-marco' && inputs.publish && inputs.commit_sha == github.sha
+    uses: ./.github/workflows/ci.yml
+
   publish:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'manojkumargudge/hybrid-rag-ms-marco' && inputs.publish
+    needs: release-gates
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'manojkumargudge/hybrid-rag-ms-marco' && inputs.publish && inputs.commit_sha == github.sha
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     environment: ghcr-release
@@ -52,6 +65,10 @@ jobs:
         env:
           REQUESTED_SHA: ${{ inputs.commit_sha }}
         run: test "$REQUESTED_SHA" = "$GITHUB_SHA"
+      - name: Require publication to be enabled
+        env:
+          GHCR_RELEASE_ENABLED: ${{ secrets.GHCR_RELEASE_ENABLED }}
+        run: test "$GHCR_RELEASE_ENABLED" = true
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false

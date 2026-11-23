@@ -166,6 +166,15 @@ def test_startup_rejects_tampering_even_with_updated_mounted_manifest(service, f
     groq_client.chat.completions.create.assert_not_called()
 
 
+def test_startup_rejects_missing_groq_key(service, monkeypatch, caplog):
+    _, groq_client, _ = service
+    monkeypatch.setattr(settings, "groq_api_key", "")
+    with pytest.raises(RuntimeError, match="RAG service initialization failed"), TestClient(app):
+        pytest.fail("Startup accepted a missing Groq key")
+    assert "rag_initialization_failed" in caplog.messages
+    groq_client.chat.completions.create.assert_not_called()
+
+
 def test_lifespan_loads_and_releases_service(service):
     _, groq_client, _ = service
     with TestClient(app) as running:
