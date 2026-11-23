@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # rerank of the top 20 candidates.
     retrieval_mode: Literal["dense", "hybrid"] = "dense"
     rerank_depth: int = Field(default=20, gt=0)
+    rerank_batch_size: int | None = Field(default=None, gt=0)
     rerank_top_k: int = Field(default=5, gt=0)
     # Hybrid mode only: candidates fetched from each retriever before RRF,
     # RRF constant, and dense weight (0.5 = standard RRF).

@@ -30,10 +30,11 @@ def test_bm25_tokenization_removes_stopwords_and_punctuation():
     assert BM25Retriever._tokenize("What are the symptoms, of diabetes?") == ["symptoms", "diabetes"]
 
 
-def test_reranker_sorts_by_cross_encoder_score():
-    reranker = CrossEncoderReranker.__new__(CrossEncoderReranker)
-    reranker.model = Mock()
-    reranker.model.predict.return_value = np.array([0.1, 0.9])
+def test_reranker_sorts_by_cross_encoder_score(monkeypatch):
+    model = Mock()
+    model.predict.return_value = np.array([0.1, 0.9])
+    monkeypatch.setattr("app.reranking.cross_encoder_reranker.CrossEncoder", Mock(return_value=model))
+    reranker = CrossEncoderReranker()
 
     results = reranker.rerank("query", [passage(1), passage(2)], top_k=1)
 
