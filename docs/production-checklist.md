@@ -28,11 +28,11 @@
 | P5 | Strip or flag claims without citations to returned passage IDs | Done | Claim lines with invalid citation structure or IDs return passages only with a reason. Covered by unit and mocked-provider tests. |
 | P5 | Tune low-confidence abstention on TUNE only and report abstention rate and tune MRR impact | Done | [500-query calibration](../eval/results/20261122-p5-tune/metrics.json). The opt-in cutoff abstained on 2.2% for an effective MRR@10 decrease of 0.00895. |
 | P5 | Report faithfulness spot check on 30 queries with manual labels from official qrels | Done (offline) | [Reviewed excerpts](../eval/results/20261122-p5-faithfulness/per_query.jsonl) and [summary](../eval/results/20261122-p5-faithfulness/metrics.json). Official qrels supply retrieval relevance. Manual labels assess source support and responsiveness. Live Groq quality remains unmeasured. |
-| P6 | CI coverage gate and measured coverage | Todo | — |
-| P6 | Strict mypy and Ruff where passing | Todo | — |
-| P6 | CI Docker build, start, readiness and one query with mocked Groq | Todo | — |
-| P6 | OpenAPI export and drift test | Todo | — |
-| P6 | Document 400, 401, 422, 429 and 503 error shapes | Todo | — |
+| P6 | CI coverage gate and measured coverage | Done | 90% application line coverage gate. Local full suite covered 706 of 738 statements (95.7%). |
+| P6 | Strict mypy and Ruff where passing | Done | Strict mypy covers artifact verification and citation validation. Ruff covers application, scripts, evaluation, and tests. |
+| P6 | CI Docker build, start, readiness and one query with mocked Groq | Done | [Reproducible smoke commands](../README.md#offline-docker-smoke-test). Pinned offline models, verified dense v3 artifacts, four ranking checks, SIGTERM drain, and two startup failure cases. |
+| P6 | OpenAPI export and drift test | Done | [Schema snapshot](openapi.json) and live endpoint comparison in pytest. |
+| P6 | Document 400, 401, 422, 429 and 503 error shapes | Done | [API response examples](../README.md#api) include error details and response headers. |
 | P7 | Slim non-root image and HEALTHCHECK | Todo | — |
 | P7 | GHCR push on main, `v1.0.0` tag and changelog | Todo | — |
 | P7 | Production Compose with limits and complete `.env.example` | Todo | — |

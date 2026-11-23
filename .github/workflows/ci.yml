@@ -29,8 +29,12 @@ jobs:
           git diff --exit-code -- requirements.lock requirements-dev.lock
       - name: Lint
         run: ruff check app evaluation tests scripts
-      - name: Test
-        run: pytest -q
+      - name: Strict type checks
+        run: mypy --strict app/artifacts.py app/generation/citations.py
+      - name: Test and enforce application coverage
+        run: |
+          coverage run --source=app -m pytest -q
+          coverage report --fail-under=90
 
   security:
     runs-on: ubuntu-latest
@@ -45,9 +49,14 @@ jobs:
         run: sh scripts/security_audit.sh
 
   docker:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
       - name: Build image (no data/indices in context)
         run: docker build -t hybrid-rag:ci .
       - name: Report image size
@@ -55,18 +64,7 @@ jobs:
           docker image inspect hybrid-rag:ci --format '{{.Size}}' \
             | awk '{printf "image_size_bytes=%d (%.1f MB)\n", $1, $1/1e6}' \
             | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Pinned models load offline from the image
-        run: >
-          docker run --rm hybrid-rag:ci python -c
-          "from app.config import settings as s;
-          from sentence_transformers import SentenceTransformer, CrossEncoder;
-          SentenceTransformer(s.embedding_model, revision=s.embedding_model_revision);
-          CrossEncoder(s.reranker_model, revision=s.reranker_model_revision);
-          print('models ok')"
-      - name: Container refuses startup without mounted artifacts
-        run: |
-          status=0
-          docker run --rm hybrid-rag:ci > startup.log 2>&1 || status=$?
-          cat startup.log
-          test "$status" -eq 3
-          grep -Fq '"error_type":"ArtifactIntegrityError"' startup.log
+      - name: Download and verify the released dense v3 artifacts
+        run: python -m scripts.fetch_artifacts --dense-only
+      - name: Exercise the offline container and verify shutdown
+        run: python -m scripts.docker_smoke --image hybrid-rag:ci

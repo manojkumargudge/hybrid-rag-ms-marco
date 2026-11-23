@@ -156,10 +156,15 @@ passages**, `"answer": null` and an `error` of `generation_failed` or
 `generation_circuit_open`. The same response shape carries `invalid_answer_citations`,
 `insufficient_evidence`, or `low_retrieval_confidence` when the answer is withheld.
 
-Errors: 400 invalid query, 401 missing or invalid API key, 422 validation error (including a
-query over `MAX_QUERY_CHARS`), 429 rate limited (`Retry-After: 60`) or at query capacity
-(`Retry-After: 1`), 500 unexpected pipeline error, 502 unexpected non-LLM runtime failure,
-and 503 service unavailable or draining.
+| HTTP | Example response and headers |
+|---|---|
+| 400 | `{"detail":"Query cannot be empty."}` for a whitespace-only query |
+| 401 | `{"detail":"Invalid or missing API key."}` with `WWW-Authenticate: ApiKey` |
+| 422 | `{"detail":[{"type":"int_type","loc":["body","top_k"],"msg":"Input should be a valid integer","input":"5"}]}` for a string `top_k`. Validation entries include `loc`, `type`, and `msg`. Other fields may vary. |
+| 429 | `{"detail":"Rate limit exceeded."}` with `Retry-After: 60`, or `{"detail":"Query concurrency limit exceeded."}` with `Retry-After: 1` |
+| 503 | Query returns `{"detail":"RAG service is not ready."}` or `{"detail":"RAG service is shutting down."}`. `/ready` returns `{"status":"not_ready","service":"hybrid-rag"}`. |
+
+Unexpected pipeline failures may also return 500 or 502 with a JSON `detail` string.
 
 ## Quick start (Docker Compose)
 
@@ -290,13 +295,41 @@ tests/               hermetic tests (tiny MS MARCO-format fixture; no network or
 
 ```bash
 ruff check app evaluation tests scripts
-pytest -q
+mypy --strict app/artifacts.py app/generation/citations.py
+coverage run --source=app -m pytest -q
+coverage report --fail-under=90
 ```
 
-CI runs lint, the tests, a lockfile-drift check, a security audit (below), a Docker build,
-an offline model-load check and a container smoke test. Dependencies are pinned in
+CI runs lint, scoped strict type checks, a 90% application line coverage gate, a
+lockfile-drift check, and the security audit below. Dependencies are pinned in
 `requirements.txt` / `requirements-dev.txt` and hash-locked for Linux in `requirements*.lock`
 (regenerate with `scripts/lock_deps.sh`).
+
+The [OpenAPI snapshot](docs/openapi.json) is checked against the served
+`/openapi.json` in pytest. After an intentional schema change, regenerate it with
+`python -m scripts.export_openapi` and commit the updated snapshot.
+
+### Offline Docker smoke test
+
+The Docker job runs on pull requests and pushes to `main`. To reproduce it from the
+repository root with a running Docker daemon, use these commands.
+
+```bash
+docker build -t hybrid-rag:ci .
+python -m scripts.fetch_artifacts --dense-only
+python -m scripts.docker_smoke --image hybrid-rag:ci
+```
+
+The image build downloads the pinned model revisions. The fetch command downloads
+only the dense index, passages, and complete v3 manifest, with SHA-256 verification
+against the committed manifest. The smoke driver then starts the image with
+`--network none`, a read-only artifact mount, and a test-only Groq replacement.
+It checks Docker health, `/health`, `/ready`, API-key enforcement, and the exact
+ordered top 10 for four saved evaluation queries. One query is held in flight
+until Uvicorn begins draining after SIGTERM. Its response must finish before the
+provider closes and the container exits. The driver also checks the configured
+2 CPU and 4 GiB limits in Docker metadata and requires startup failure with
+missing or corrupt artifacts.
 
 ## Performance benchmark
 
