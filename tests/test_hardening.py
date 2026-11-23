@@ -1,6 +1,7 @@
 """Hardening: auth-by-default allowlist, per-key rate limit, query cap,
 LLM failure fallback, key_id logging, /metrics. No network, no Groq calls."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -10,12 +11,13 @@ from unittest.mock import Mock, patch
 import httpx
 import pytest
 from groq import APIStatusError, APITimeoutError
+from pydantic import ValidationError
 
-from app.config import settings
+from app.config import Settings, settings
 from app.generation.groq_generator import GroqGenerator
 from app.main import _JsonFormatter, app
 from app.metrics import REGISTRY
-from app.middleware import OPEN_PATHS
+from app.middleware import OPEN_PATHS, QueryBodyLimitMiddleware
 from app.rag_service import RAGService
 from tests.conftest import TEST_API_KEY
 
@@ -30,6 +32,110 @@ def mock_service(monkeypatch):
     service.answer.return_value = {"answer": "ok", "citations": [], "latency_ms": 1.0}
     monkeypatch.setattr(app.state, "rag_service", service)
     return service
+
+
+def test_settings_hide_credentials_and_still_load_them(monkeypatch):
+    credentials = {"API_KEY": "synthetic-api-value", "GROQ_API_KEY": "synthetic-groq-value"}
+    for name, value in credentials.items():
+        monkeypatch.setenv(name, value)
+    configured = Settings(_env_file=None)
+    assert configured.api_key == credentials["API_KEY"]
+    assert configured.groq_api_key == credentials["GROQ_API_KEY"]
+    for diagnostic in (repr(configured), str(configured)):
+        assert all(value not in diagnostic for value in credentials.values())
+
+    monkeypatch.setenv("MAX_QUERY_BODY_BYTES", credentials["GROQ_API_KEY"])
+    with pytest.raises(ValidationError) as invalid:
+        Settings(_env_file=None)
+    assert credentials["GROQ_API_KEY"] not in str(invalid.value)
+
+
+@pytest.mark.parametrize(("delta", "status"), [(-1, 200), (0, 200), (1, 413)])
+def test_query_body_limit_boundary(client, mock_service, monkeypatch, delta, status):
+    monkeypatch.setattr(settings, "max_query_body_bytes", 32)
+    body = b'{"query":"ok"}'.ljust(32 + delta)
+    response = client.post("/api/v1/query", content=body, headers={
+        "Content-Type": "application/json", "X-Request-ID": "body-limit-test",
+    })
+    assert response.status_code == status
+    assert response.headers["X-Request-ID"] == "body-limit-test"
+    if status == 413:
+        assert response.json() == {"detail": "Request body exceeds the byte limit."}
+    assert mock_service.answer.call_count == int(status == 200)
+
+
+@pytest.mark.parametrize("content_length", [None, "1", "invalid", "100"])
+@pytest.mark.parametrize("path", ["/api/v1/query", "/api/v1/query/"])
+def test_actual_stream_is_bounded_before_json_parsing(
+    monkeypatch, mock_service, content_length, path,
+):
+    monkeypatch.setattr(settings, "max_query_body_bytes", 8)
+
+    async def chunks():
+        yield b'{"'
+        yield b"invalid and oversized"
+
+    async def post():
+        headers = {"X-API-Key": TEST_API_KEY, "Content-Type": "application/json"}
+        if content_length is not None:
+            headers["Content-Length"] = content_length
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, root_path="/staging"),
+            base_url="http://testserver",
+        ) as http:
+            return await http.post(f"/staging{path}", content=chunks(), headers=headers)
+
+    assert asyncio.run(post()).status_code == 413
+    mock_service.answer.assert_not_called()
+
+
+def test_query_body_limit_preserves_auth_and_malformed_json(client, anon_client, monkeypatch):
+    monkeypatch.setattr(settings, "max_query_body_bytes", 8)
+    headers = {"Content-Type": "application/json"}
+    assert anon_client.post("/api/v1/query", content=b"x" * 9, headers=headers).status_code == 401
+    malformed = client.post("/api/v1/query", content=b"{", headers=headers)
+    assert malformed.status_code == 422
+    assert malformed.json()["detail"][0]["type"] == "json_invalid"
+
+
+def test_query_body_limit_handles_disconnect_without_replaying():
+    endpoint = Mock(side_effect=AssertionError("Endpoint reached after disconnect"))
+    send = Mock(side_effect=AssertionError("Response started after disconnect"))
+    messages = iter([
+        {"type": "http.request", "body": b"{", "more_body": True},
+        {"type": "http.disconnect"},
+    ])
+
+    async def receive():
+        return next(messages)
+
+    scope = {"type": "http", "method": "POST", "path": "/api/v1/query"}
+    asyncio.run(QueryBodyLimitMiddleware(endpoint)(scope, receive, send))
+    endpoint.assert_not_called()
+    send.assert_not_called()
+
+
+def test_query_body_limit_replays_multiple_chunks_and_forwards_later_disconnect(monkeypatch):
+    monkeypatch.setattr(settings, "max_query_body_bytes", 4)
+    messages = iter([
+        {"type": "http.request", "body": b"ab", "more_body": True},
+        {"type": "http.request", "body": b"cd"},
+        {"type": "http.disconnect"},
+    ])
+    received = []
+
+    async def receive():
+        return next(messages)
+
+    async def endpoint(scope, read, send):
+        received.extend([await read(), await read()])
+
+    scope = {"type": "http", "method": "POST", "path": "/api/v1/query"}
+    asyncio.run(QueryBodyLimitMiddleware(endpoint)(scope, receive, Mock()))
+    assert received == [
+        {"type": "http.request", "body": b"abcd", "more_body": False},
+        {"type": "http.disconnect"},
+    ]
 
 
 # --- auth by default + allowlist ------------------------------------------

@@ -25,6 +25,12 @@ ENV HF_HUB_OFFLINE=1 \
 COPY app ./app
 COPY manifests/v3.json ./manifests/v3.json
 
+# Debian's DSA-6613-1 fixes CVE-2026-85091 in this pinned base image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' zlib1g)" ge '1:1.3.dfsg+really1.3.1-1+deb13u1' \
+    && rm -rf /var/lib/apt/lists/*
+
 # Data and indices are NOT baked in; mount them read-only at runtime
 # (see docker-compose.yml). Startup verifies artifacts before serving.
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \

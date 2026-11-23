@@ -5,10 +5,10 @@
 | Step 0 | Record branch, main SHA, open PRs, PR #6, local branches, main CI and test count | Done | Clean `main` (only local branch before P1) at `b16cef56ac1e09b75d4acc402cbc53029ea92409`. No open PRs. [PR #6](https://github.com/manojkumargudge/hybrid-rag-ms-marco/pull/6) merged with README and MIT license. [CI #45](https://github.com/manojkumargudge/hybrid-rag-ms-marco/actions/runs/44735929786) green, 129 tests passed. |
 | Step 0 | Create this tracker and update it each phase | Done | This file |
 | P1 | Environment-backed `X-API-Key` auth, constant-time comparison, fail closed, public health/readiness, 401 and no raw keys in logs | Done | `app/auth.py`, `app/middleware.py`, `tests/test_auth.py`, `tests/test_hardening.py` |
-| P1 | pip-audit, Bandit, Trivy image scan and Gitleaks in CI | Partial | Main runs pip-audit and Bandit. Trivy and Gitleaks are in PR #12. |
-| P1 | Dependabot | Todo | Configuration is in PR #12. |
+| P1/P7 | pip-audit, Bandit, Trivy image scan and Gitleaks in CI | Configured | CI checks both lockfiles, scans the tracked tree and reachable history, and gates high and critical findings on the tested Docker image. |
+| P1/P7 | Dependabot | Configured | Weekly Python, GitHub Actions, and Docker update checks. |
 | P1 | Scoped security exceptions with reason, expiry and failing CI when expired | Done | `.github/security-ignore.json`, `scripts/security_gate.py`, `tests/test_security_gate.py` |
-| P1 | Query length and request body byte limits | Partial | Main validates query length. The byte limit is in PR #12. |
+| P1/P7 | Query length and request body byte limits | Implemented | Authenticated query bodies are capped before JSON parsing. The existing character limit still applies to parsed queries. |
 | P1 | Untrusted retrieved passages and prompt-injection regression | Partial | `app/generation/groq_generator.py`, mocked provider contract in PR #12 |
 | P2 | JSON logs with request ID and no query, key or passage contents | Done | `app/main.py`, `app/middleware.py`, privacy regression in `tests/test_hardening.py` |
 | P2 | Prometheus request count, errors, per-stage latency, Groq failures/timeouts and rate-limit hits | Done | `app/metrics.py`, retry and rate-limit assertions in `tests/test_hardening.py` |

@@ -21,7 +21,12 @@ from app.auth import API_KEY_HEADER, configured_key, log_auth_configuration
 from app.config import settings, warn_legacy_settings
 from app.generation.groq_generator import GroqGenerator
 from app.metrics import render as render_metrics
-from app.middleware import ProductionMiddleware, key_id_context, request_id_context
+from app.middleware import (
+    ProductionMiddleware,
+    QueryBodyLimitMiddleware,
+    key_id_context,
+    request_id_context,
+)
 from app.rag_service import RAGService
 from app.reranking.cross_encoder_reranker import CrossEncoderReranker
 from app.retrieval.bm25_retriever import BM25Retriever
@@ -181,6 +186,9 @@ app = FastAPI(
     swagger_ui_oauth2_redirect_url=None,
 )
 
+# Authentication and rate limiting run outside the body limit. CORS can
+# decorate a 413 response, and the router only receives accepted bodies.
+app.add_middleware(QueryBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

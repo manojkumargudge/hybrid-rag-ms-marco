@@ -41,6 +41,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -48,20 +51,23 @@ jobs:
         run: pip install pip-audit==2.10.1 bandit==1.9.4
       - name: pip-audit (lockfiles, strict) + bandit -ll (app/)
         run: sh scripts/security_audit.sh
-      - name: Scan the tracked release tree for secrets
+      - name: Scan the tracked tree and reachable Git history for secrets
         run: bash scripts/scan_release_secrets.sh
 
   docker:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Build image (no data/indices in context)
-        run: docker build -t hybrid-rag:ci .
+        id: build-image
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          docker build -t hybrid-rag:ci .
       - name: Report image size
         run: |
           docker image inspect hybrid-rag:ci --format '{{.Size}}' \
@@ -73,3 +79,13 @@ jobs:
         run: python -m scripts.docker_smoke --image hybrid-rag:ci
       - name: Rehearse a failed deployment and rollback with Compose
         run: bash scripts/operations_smoke.sh hybrid-rag:ci
+      - name: Scan the tested image for high and critical vulnerabilities
+        if: ${{ !cancelled() && steps.build-image.outcome == 'success' }}
+        run: bash scripts/scan_image_security.sh hybrid-rag:ci "${{ runner.temp }}/trivy-image.json"
+      - name: Retain the image vulnerability report
+        if: ${{ !cancelled() && steps.build-image.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: trivy-image-report
+          path: ${{ runner.temp }}/trivy-image.json
+          retention-days: 14
