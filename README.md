@@ -5,6 +5,9 @@ candidates with a dense bi-encoder, reranks them with a cross-encoder, and promp
 Groq to answer using the top passages. The API returns those passages as citations. Hybrid retrieval
 (dense + BM25 fused with reciprocal rank fusion) is available as a configuration option.
 
+See the [release runbook](docs/release.md), [changelog](CHANGELOG.md), and
+[validation evidence](docs/evidence.md) for the v1.0.0 candidate.
+
 ## Headline result
 
 **Served system (dense retrieval, cross-encoder rerank of the top 20): MRR@10 = 0.779
@@ -88,6 +91,8 @@ selection rules were committed before the eval run
    On tune, depth 50 scored 0.8003 and depth 20 scored 0.7925, so depth 20 is served.
 
 ## Architecture
+
+The [architecture decisions](docs/architecture-decisions.md) record the rationale and tradeoffs.
 
 ```mermaid
 flowchart TD
@@ -551,8 +556,9 @@ Other measures:
 - The corpus is a 150k-passage subset, so absolute scores are not comparable to full-corpus
   results.
 - Hard negatives come from BM25 candidate pools.
-- Latency was measured sequentially on one laptop CPU. The published results contain no GPU
-  or concurrency benchmark.
+- The saved EVAL latency was measured sequentially on one laptop CPU. The separate
+  [P4 load benchmark](#performance-benchmark) covers 1, 5, and 20 clients with
+  generation stubbed. GPU performance remains unmeasured.
 - The rate limiter is in-memory and per process; multi-worker or multi-instance deployments
   need Redis (or similar) to share it. Unauthenticated requests are keyed on the TCP peer, so
   behind a proxy they share one bucket.
