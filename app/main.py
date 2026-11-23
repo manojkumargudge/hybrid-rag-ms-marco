@@ -143,6 +143,9 @@ def create_rag_service() -> RAGService:
         generator=generator,
         rerank_depth=settings.rerank_depth,
         rerank_top_k=settings.rerank_top_k,
+        min_rerank_score=(
+            settings.dense_min_rerank_score if settings.retrieval_mode == "dense" else None
+        ),
     )
 
 

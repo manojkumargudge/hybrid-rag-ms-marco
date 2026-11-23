@@ -144,7 +144,7 @@ Response shape:
 
 ```json
 {
-  "answer": "…",
+  "answer": "… [pid:123]",
   "citations": [{"passage_id": 123, "passage_text": "…", "score": 8.75}],
   "latency_ms": 812.4,
   "error": null
@@ -153,7 +153,8 @@ Response shape:
 
 If generation fails or the Groq circuit is open, the response is **200 with the reranked
 passages**, `"answer": null` and an `error` of `generation_failed` or
-`generation_circuit_open`.
+`generation_circuit_open`. The same response shape carries `invalid_answer_citations`,
+`insufficient_evidence`, or `low_retrieval_confidence` when the answer is withheld.
 
 Errors: 400 invalid query, 401 missing or invalid API key, 422 validation error (including a
 query over `MAX_QUERY_CHARS`), 429 rate limited (`Retry-After: 60`) or at query capacity
@@ -260,6 +261,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `RETRIEVAL_MODE` | `dense` | `dense` or `hybrid` |
 | `RERANK_DEPTH` | `20` | Candidates the cross-encoder reranks |
 | `RERANK_BATCH_SIZE` | unset | Optional per-query cross-encoder batch size. Unset uses the model library default. |
+| `DENSE_MIN_RERANK_SCORE` | unset | Optional dense-only cutoff for the top reranker score before generation. |
 | `RERANK_TOP_K` | `5` | Fallback for direct service calls that omit `top_k`. The HTTP API defaults to 5 independently. |
 | `RETRIEVAL_K` | `20` | Hybrid only: candidates from each retriever before fusion |
 | `RRF_K` | `60` | Hybrid only: RRF constant |
@@ -355,6 +357,45 @@ record their passage IDs by query. Their startup timings are excluded from the
 load comparison. [Baseline parity](eval/results/20261122-p4-parity-baseline/metrics.json)
 and [batch-size-8 parity](eval/results/20261122-p4-parity-batch8/metrics.json).
 
+## Answer grounding and abstention
+
+The prompt asks for one plain-text claim per line, each ending with one or more
+`[pid:123]` references. The service withholds a generated answer when a claim line
+is uncited, has multiple apparent sentences, or cites an ID absent from the returned
+passages. The service also withholds the answer when the provider explicitly reports
+insufficient evidence. These checks establish citation format and membership. A
+valid citation can still point to evidence that fails to support the claim.
+
+For dense retrieval, `DENSE_MIN_RERANK_SCORE` can skip Groq when the highest reranker
+score is below a calibrated cutoff. The response retains the same ranked passages.
+The option is unset by default. The calibration applies to the published v3 corpus,
+default MiniLM revisions, dense retrieval, and rerank depth 20.
+
+```bash
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 \
+  python -m evaluation.calibrate_abstention --output eval/results/local-p5-tune --threads 4
+python -m evaluation.prepare_faithfulness_review --output offline-review.jsonl
+```
+
+The calibration uses only the official v3 TUNE queries and qrels. It maximizes
+abstentions within a 0.01 effective MRR@10 loss budget. Effective MRR counts
+abstained queries as zero, while answered-only MRR uses only the covered queries.
+Retrieval rankings are unchanged by the confidence gate.
+
+On 500 TUNE queries, the selected cutoff was `1.9534612894058228`, which
+abstained on 11 queries (2.2%). Baseline MRR@10 was 0.79155 and effective MRR@10
+was 0.78259, a decrease of 0.00895. Answered-only MRR@10 was 0.80020.
+[Calibration results](eval/results/20261122-p5-tune/metrics.json)
+
+The [30-query review](eval/results/20261122-p5-faithfulness/per_query.jsonl) uses the
+first 30 saved EVAL queries for a separate offline spot check. It takes an extract
+from each top-ranked passage, applies the citation check, and manually labels
+source support and responsiveness. All 30 passed the citation check. The review
+found 21 source-supported claims and 9 fragments without a substantive claim.
+Ten excerpts answered fully, 4 answered partially, and 16 did not answer. The
+cited passage had a positive official qrel in 21 cases. These labels describe
+offline extracts. Live Groq output quality remains unmeasured.
+
 ## Operations
 
 **Probes.**
@@ -393,7 +434,7 @@ Example:
 | Metric | Type | Labels |
 |---|---|---|
 | `rag_stage_latency_seconds` | histogram | `stage` = `retrieve`, `rerank`, `generate` |
-| `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `query_capacity_exceeded`, `service_unavailable`, `invalid_request`, `generation_failed`, `generation_circuit_open`, `groq_timeout`, `pipeline_error` |
+| `rag_errors_total` | counter | `type` = `unauthorized`, `rate_limited`, `query_capacity_exceeded`, `service_unavailable`, `invalid_request`, `generation_failed`, `generation_circuit_open`, `groq_timeout`, `pipeline_error`, `invalid_answer_citations`, `insufficient_evidence`, `low_retrieval_confidence` |
 | `http_requests_total` | counter | `status` |
 | `http_request_duration_seconds` | histogram | None |
 
@@ -478,8 +519,8 @@ Other measures:
 - The rate limiter is in-memory and per process; multi-worker or multi-instance deployments
   need Redis (or similar) to share it. Unauthenticated requests are keyed on the TCP peer, so
   behind a proxy they share one bucket.
-- Answers depend on an external LLM API. The prompt asks the model to use the retrieved
-  passages as its source. The service does not check answer faithfulness.
+- Answers depend on an external LLM API. Citation checks validate references to
+  returned passages. Claim-level entailment remains unverified.
 
 ## History
 

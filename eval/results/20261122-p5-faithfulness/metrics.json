@@ -1,0 +1,17 @@
+{
+  "sample": "First 30 qids of saved official v3 EVAL ranking, review only",
+  "method": "Offline first sentence or fragment from the highest ranked passage",
+  "n_queries": 30,
+  "citation_checks_passed": 30,
+  "positive_official_qrel_for_cited_passage": 21,
+  "manual_source_support": {
+    "supported": 21,
+    "no_substantive_claim": 9
+  },
+  "manual_responsiveness": {
+    "partial": 4,
+    "full": 10,
+    "no": 16
+  },
+  "live_groq_calls": 0
+}

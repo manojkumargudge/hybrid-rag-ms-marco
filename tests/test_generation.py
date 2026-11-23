@@ -65,7 +65,7 @@ def test_groq_retries_transient_timeout_and_succeeds():
     generator = _generator(client)
 
     with patch("app.generation.groq_generator.time.sleep"):
-        answer = generator.generate("question", [{"passage_text": "context"}])
+        answer = generator.generate("question", [{"passage_id": 1, "passage_text": "context"}])
 
     assert answer == "grounded answer"
     assert client.chat.completions.create.call_count == 2
@@ -80,7 +80,7 @@ def test_groq_exhausts_bounded_retries_as_runtime_error():
         RuntimeError,
         match="LLM generation failed",
     ):
-        generator.generate("question", [{"passage_text": "context"}])
+        generator.generate("question", [{"passage_id": 1, "passage_text": "context"}])
 
     assert client.chat.completions.create.call_count == 2
 
@@ -103,7 +103,7 @@ def test_timeouts_429_and_5xx_are_retried(error):
     client = Mock()
     client.chat.completions.create.side_effect = [error, _response("ok")]
     with patch("app.generation.groq_generator.time.sleep"):
-        assert _generator(client, max_retries=2).generate("q", [{"passage_text": "c"}]) == "ok"
+        assert _generator(client, max_retries=2).generate("q", [{"passage_id": 1, "passage_text": "c"}]) == "ok"
     assert client.chat.completions.create.call_count == 2
 
 
@@ -120,7 +120,7 @@ def test_other_errors_fail_immediately_without_retry(error):
     with patch("app.generation.groq_generator.time.sleep") as sleep, pytest.raises(
         RuntimeError, match="LLM generation failed"
     ):
-        _generator(client, max_retries=2).generate("q", [{"passage_text": "c"}])
+        _generator(client, max_retries=2).generate("q", [{"passage_id": 1, "passage_text": "c"}])
     assert client.chat.completions.create.call_count == 1
     sleep.assert_not_called()
 
@@ -152,7 +152,7 @@ def test_per_attempt_timeout_is_capped_by_remaining_deadline():
     client.chat.completions.create.side_effect = _slow_timeouts(clock, cost=9.0)
     with patch("app.generation.groq_generator.time", clock), pytest.raises(RuntimeError):
         _generator(client, max_retries=2, timeout=10.0, deadline=20.0).generate(
-            "q", [{"passage_text": "c"}])
+            "q", [{"passage_id": 1, "passage_text": "c"}])
 
     timeouts = [c.kwargs["timeout"] for c in client.chat.completions.create.call_args_list]
     # t=0: 10 s; t=9.2: 10 s; t=18.6: only 1.4 s left before the 20 s deadline.
@@ -167,7 +167,7 @@ def test_no_attempt_or_backoff_starts_after_the_deadline():
         RuntimeError, match="deadline exceeded"
     ):
         _generator(client, max_retries=10, timeout=10.0, deadline=20.0).generate(
-            "q", [{"passage_text": "c"}])
+            "q", [{"passage_id": 1, "passage_text": "c"}])
 
     # t=0 -> 10, sleep 0.2, t=10.2 -> 20 (capped at 9.8 left); the next backoff
     # would cross 20 s, so it stops after 2 attempts despite max_retries=10.

@@ -55,9 +55,14 @@ def service(built, monkeypatch, request):
     mode = getattr(request, "param", "dense")
     out = built
     groq_client = Mock()
-    groq_client.chat.completions.create.return_value = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="Grounded answer."))]
-    )
+    def completion(**kwargs):
+        tag = next(line for line in kwargs["messages"][1]["content"].splitlines()
+                   if line.startswith("[pid:"))
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=f"Grounded answer. {tag}"))]
+        )
+
+    groq_client.chat.completions.create.side_effect = completion
     monkeypatch.setattr(
         "app.retrieval.dense_retriever.SentenceTransformer",
         lambda *a, **k: HashEncoder(),
@@ -101,8 +106,8 @@ def test_query_end_to_end_on_fixture(client, service):
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["answer"] == "Grounded answer."
     citation_ids = [c["passage_id"] for c in body["citations"]]
+    assert body["answer"] == f"Grounded answer. [pid:{citation_ids[0]}]"
     assert len(citation_ids) == 3
     assert citation_ids[0] == relevant_pid
     corpus_ids = set(pd.read_parquet(out / "passages.parquet")["passage_id"])
@@ -110,6 +115,7 @@ def test_query_end_to_end_on_fixture(client, service):
 
     prompt = groq_client.chat.completions.create.call_args.kwargs["messages"][1]
     assert body["citations"][0]["passage_text"] in prompt["content"]
+    assert f"[pid:{citation_ids[0]}]" in prompt["content"]
 
     meta = client.get("/metadata").json()
     assert meta["retrieval_mode"] == mode
@@ -252,6 +258,25 @@ def test_opt_in_reranker_batch_size_reaches_model(client, service, monkeypatch):
     assert response.json()["citations"][0]["passage_id"] == relevant_pid
     assert predict.call_args.kwargs == {"batch_size": 8}
     assert len(predict.call_args.args[0]) == settings.rerank_depth
+
+
+@pytest.mark.parametrize("service", MODES, indirect=True)
+def test_tuned_confidence_gate_is_dense_only(client, service, monkeypatch):
+    out, groq_client, mode = service
+    monkeypatch.setattr(settings, "dense_min_rerank_score", 1000)
+    query, _ = _first_eval_query(out)
+    response = client.post("/api/v1/query", json={"query": query, "top_k": 3})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["citations"]) == 3
+    if mode == "dense":
+        assert body["answer"] is None
+        assert body["error"] == "low_retrieval_confidence"
+        groq_client.chat.completions.create.assert_not_called()
+    else:
+        assert body["answer"] is not None
+        assert body["error"] is None
+        groq_client.chat.completions.create.assert_called_once()
 
 
 @pytest.mark.parametrize("service", ["hybrid"], indirect=True)

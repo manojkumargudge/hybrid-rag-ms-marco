@@ -30,11 +30,11 @@ class SourceResponse(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str | None = Field(
-        description="Grounded answer, or null if generation failed or the circuit is open."
+        description="Answer with passage ID citations, or null on abstention or fallback."
     )
     citations: list[SourceResponse]
     latency_ms: float = Field(ge=0)
     error: str | None = Field(
         default=None,
-        description="Set to 'generation_failed' or 'generation_circuit_open' on fallback.",
+        description="Machine-readable reason for withholding the answer.",
     )

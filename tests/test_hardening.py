@@ -195,11 +195,11 @@ def test_non_transient_groq_error_is_not_retried_and_degrades(client, monkeypatc
 
 
 def test_transient_failure_then_success_returns_answer(client, monkeypatch):
-    ok = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="fine"))])
+    ok = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="fine [pid:3]"))])
     _service_with_groq(monkeypatch, [_timeout(), ok])
     with patch("app.generation.groq_generator.time.sleep"):
         body = client.post("/api/v1/query", json={"query": "q"}).json()
-    assert body["answer"] == "fine"
+    assert body["answer"] == "fine [pid:3]"
     assert body["error"] is None
 
 
