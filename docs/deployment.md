@@ -9,11 +9,29 @@ the GitHub release. The running image uses its baked model snapshots and needs
 Groq connectivity for live generation.
 
 The [operations Compose file](../compose.operations.yml) binds only to IPv4
-loopback. Handle TLS and any external routing with your existing gateway. Keep
+loopback, drops all Linux capabilities, and disallows gaining privileges.
+Terminate TLS at an authorized gateway on the same host. Keep
 the listener local until the checks below pass. Use the dense profile and the
 published v3 corpus for the deployment covered by CI. The release contains a
 150,000-passage subset of the 8.8M-passage collection. Review the
 [MS MARCO non-commercial research terms](../README.md#data) before use.
+
+## Configure the gateway
+
+- Point the service DNS name at the gateway and validate the certificate chain,
+  renewal, and hostname before opening ingress. Proxy to `127.0.0.1:8000`.
+  Preserve the approved DNS name in the upstream `Host` header and list it
+  in `TRUSTED_HOSTS` together with `localhost,127.0.0.1` for direct probes.
+- Leave `CORS_ORIGINS` empty for server clients. Browser clients require an
+  explicit list of HTTPS origins. Keep `/metrics` on a private scrape path
+  and supply its API credential from the scraper's secret store.
+- Enforce the configured query body cap at the gateway and bound slow body
+  uploads. The app defaults to 32 KiB before parsing, 60 requests per minute
+  per key per worker, and two concurrent queries per worker. Its 20-second
+  generation deadline covers Groq work only. Set upstream and client timeouts
+  using measured end-to-end latency, including retrieval and reranking.
+  Keep the app's current proxy-header policy and apply any per-client network
+  limits at the gateway. Exclude API headers and bodies from access logs.
 
 ## Stage a release
 
@@ -31,12 +49,16 @@ revision=$(git rev-parse HEAD)
 release="$root/$(date -u +%Y%m%dT%H%M%SZ)-${revision:0:12}"
 mkdir "$release"
 artifacts="$release/artifacts-v3"
-image="hybrid-rag:release-${release##*/}"
+image="${RELEASE_IMAGE:?Set the approved GHCR repository digest reference}"
+[[ "$image" =~ ^ghcr\.io/manojkumargudge/hybrid-rag-ms-marco@sha256:[0-9a-f]{64}$ ]]
+docker pull "$image"
+test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$revision"
+test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image")" = '1.0.0'
 python -m scripts.fetch_artifacts --dense-only --dest "$artifacts"
 # The non-root container user needs read access inside the mounted bundle.
 find "$artifacts" -type d -exec chmod 0555 {} +
 find "$artifacts" -type f -exec chmod 0444 {} +
-docker build --tag "$image" .
+printf '%s\n' "$image" > "$release/image-ref"
 docker image inspect --format '{{.Id}}' "$image" > "$release/image-id"
 printf '%s\n' "$revision" > "$release/source-revision"
 printf 'dense\n' > "$release/retrieval-mode"
@@ -135,4 +157,6 @@ It stages two distinct local image IDs, detects a candidate that fails readiness
 restores the recorded previous image, and verifies a stubbed query. The overlay
 disables external networking and host port publication. A real TLS gateway,
 live Groq, hybrid startup, and a production-host cutover remain outside this
-rehearsal. [P6 Docker run](https://github.com/manojkumargudge/hybrid-rag-ms-marco/actions/runs/44999677261/job/137138232390)
+rehearsal. An isolated P7 staging exercise separately verified hybrid startup
+and live Groq in-process. Track target-host checks and operator sign-off in the
+[production checklist](production-checklist.md). [P6 Docker run](https://github.com/manojkumargudge/hybrid-rag-ms-marco/actions/runs/44999677261/job/137138232390)

@@ -13,7 +13,7 @@ window before replacing the container.
    release selection file. Keep full Docker configuration and secret values out
    of incident records.
 2. Locate the last release that passed validation. Select its retained image
-   tag, recorded image ID, artifact directory, retrieval mode, and compatible
+   digest reference, recorded image ID, artifact directory, retrieval mode, and compatible
    settings. Never retag a current image as the old release. If the image was
    archived or staged by digest, restore that identical image first and check its
    recorded ID. Rebuilding an old revision can resolve to a different base image.
@@ -29,9 +29,9 @@ window before replacing the container.
 set -euo pipefail
 set +x
 unset RAG_IMAGE RAG_ARTIFACT_DIR RAG_RUNTIME_ENV_FILE API_PORT API_CPUS API_MEMORY_LIMIT
-# Set these paths and the tag from the last known-good release record.
+# Set this path to the last known-good release record.
 previous=/absolute/path/to/known-good-release
-image=hybrid-rag:recorded-release-tag
+image=$(cat "$previous/image-ref")
 artifacts="$previous/artifacts-v3"
 image_id=$(cat "$previous/image-id")
 python -m scripts.validate_release preflight --image "$image" --image-id "$image_id" \
@@ -54,7 +54,10 @@ test "$(docker inspect --format '{{.Image}}' "$container")" = "$image_id"
 ```
 
 Run from the repository root and adjust the probe port to the selected host
-port. The Compose file keeps the artifacts mounted read-only. Restore the
+port. If the retained digest image is missing, an authorized operator can
+run `docker pull "$image"` before preflight. For an older isolated staging
+bundle, use the recorded local image reference and ID. The Compose file keeps
+the artifacts mounted read-only. Restore the
 previous compatible manifest and artifact set as a unit. Keep the failed bundle
 unmodified while gathering evidence. Avoid pruning images or deleting release
 directories during recovery.

@@ -10,6 +10,12 @@ from pathlib import Path
 REPOSITORY = "manojkumargudge/hybrid-rag-ms-marco"
 REGISTRY_REPOSITORY = f"ghcr.io/{REPOSITORY}"
 LOCAL_IMAGE = "hybrid-rag:release-check"
+RELEASE_VERSION = "1.0.0"
+IMAGE_IDENTITY = (
+    '{{.Id}} {{index .Config.Labels "org.opencontainers.image.source"}} '
+    '{{index .Config.Labels "org.opencontainers.image.revision"}} '
+    '{{index .Config.Labels "org.opencontainers.image.version"}}'
+)
 
 
 def authorized_revision(env: dict[str, str]) -> str:
@@ -41,13 +47,11 @@ def publish(env: dict[str, str]) -> str:
     tag = f"{REGISTRY_REPOSITORY}:sha-{revision}"
     with tempfile.TemporaryDirectory(prefix="rag-ghcr-") as directory:
         cli_env["DOCKER_CONFIG"] = directory
-        local = docker(
-            "image", "inspect", "--format",
-            '{{index .Config.Labels "org.opencontainers.image.revision"}}',
-            LOCAL_IMAGE, env=cli_env,
-        ).stdout.strip()
-        if local != revision:
-            raise ValueError("The tested local image revision does not match the requested SHA.")
+        local = docker("image", "inspect", "--format", IMAGE_IDENTITY,
+                       LOCAL_IMAGE, env=cli_env).stdout.split()
+        if (len(local) != 4 or re.fullmatch(r"sha256:[0-9a-f]{64}", local[0]) is None
+                or local[1:] != [f"https://github.com/{REPOSITORY}", revision, RELEASE_VERSION]):
+            raise ValueError("The tested image identity or OCI labels do not match the release.")
         docker("login", "ghcr.io", "--username", cli_env["GITHUB_ACTOR"], "--password-stdin",
                env=cli_env, token=token)
         remote = docker("manifest", "inspect", tag, env=cli_env, check=False)
@@ -66,7 +70,11 @@ def publish(env: dict[str, str]) -> str:
                    if re.fullmatch(rf"{re.escape(REGISTRY_REPOSITORY)}@sha256:[0-9a-f]{{64}}", ref)]
         if len(digests) != 1:
             raise ValueError("Push returned no unique registry digest. Inspect GHCR before retrying.")
-        docker("manifest", "inspect", digests[0], env=cli_env)
+        docker("pull", digests[0], env=cli_env)
+        pulled = docker("image", "inspect", "--format", IMAGE_IDENTITY,
+                        digests[0], env=cli_env).stdout.split()
+        if pulled != local:
+            raise ValueError("The image pulled by digest does not match the tested image.")
         return digests[0]
 
 

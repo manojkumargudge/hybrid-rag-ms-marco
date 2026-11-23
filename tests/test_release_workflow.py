@@ -10,6 +10,8 @@ from scripts import publish_image
 SHA = "ab" * 20
 DIGEST = f"{publish_image.REGISTRY_REPOSITORY}@sha256:" + "cd" * 32
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/release-image.yml"
+LOCAL_ID = "sha256:" + "ef" * 32
+IDENTITY = f"{LOCAL_ID} https://github.com/{publish_image.REPOSITORY} {SHA} 1.0.0"
 
 
 @pytest.fixture
@@ -30,6 +32,7 @@ def test_release_workflow_keeps_registry_write_out_of_pr_runs():
     workflow = yaml.load(WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert set(workflow["on"]) == {"pull_request", "workflow_dispatch"}
     assert workflow["on"]["workflow_dispatch"]["inputs"]["publish"]["default"] == "false"
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["commit_sha"]["required"] == "true"
     assert workflow["permissions"] == {"contents": "read"}
     verify, publish = (workflow["jobs"][job] for job in ("verify", "publish"))
     assert "permissions" not in verify
@@ -50,6 +53,8 @@ def test_release_workflow_keeps_registry_write_out_of_pr_runs():
     assert enable["env"] == {"GHCR_RELEASE_ENABLED": "${{ secrets.GHCR_RELEASE_ENABLED }}"}
     assert enable["run"] == 'test "$GHCR_RELEASE_ENABLED" = true'
     assert build["run"] == "bash scripts/check_release_image.sh"
+    assert verify["steps"][-1]["run"] == build["run"]
+    assert verify["steps"][-1]["env"] == build["env"] == {"REQUESTED_SHA": "${{ inputs.commit_sha }}"}
     assert "GHCR_TOKEN" in push["env"]
     gates = workflow["jobs"]["release-gates"]
     assert publish["needs"] == "release-gates"
@@ -82,13 +87,14 @@ def test_publication_refuses_wrong_context_before_docker(release_env, name, inva
         publish_image.publish(release_env)
 
 
-@pytest.mark.parametrize(("status", "message", "allowed"), [
-    (0, "", False),
-    (1, "denied: permission refused", False),
-    (1, "no such manifest: expected tag", True),
+@pytest.mark.parametrize(("status", "message", "allowed", "recovered"), [
+    (0, "", False, True),
+    (1, "denied: permission refused", False, True),
+    (1, "no such manifest: expected tag", True, True),
+    (1, "no such manifest: expected tag", True, False),
 ])
 def test_publisher_pushes_only_when_the_commit_tag_is_absent(
-    monkeypatch, release_env, status, message, allowed,
+    monkeypatch, release_env, status, message, allowed, recovered,
 ):
     calls = []
     target = f"{publish_image.REGISTRY_REPOSITORY}:sha-{SHA}"
@@ -99,7 +105,13 @@ def test_publisher_pushes_only_when_the_commit_tag_is_absent(
         assert token == ("offline-test-token" if args[0] == "login" else None)
         calls.append(args)
         if args[:2] == ("image", "inspect"):
-            result = SHA if args[-1] == publish_image.LOCAL_IMAGE else json.dumps([DIGEST])
+            inspected = args[-1]
+            if inspected == target:
+                result = json.dumps([DIGEST])
+            elif inspected == DIGEST and not recovered:
+                result = IDENTITY.replace(LOCAL_ID, "sha256:" + "00" * 32)
+            else:
+                result = IDENTITY
             return CompletedProcess(args, 0, result, "")
         if args == ("manifest", "inspect", target):
             assert not check
@@ -107,11 +119,25 @@ def test_publisher_pushes_only_when_the_commit_tag_is_absent(
         return CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(publish_image, "docker", fake_docker)
-    if allowed:
+    if allowed and recovered:
         assert publish_image.publish(release_env) == DIGEST
         assert ("push", target) in calls
-        assert calls[-1] == ("manifest", "inspect", DIGEST)
+        assert ("pull", DIGEST) in calls
+        assert calls[-1][-1] == DIGEST
+    elif allowed:
+        with pytest.raises(ValueError, match="pulled by digest"):
+            publish_image.publish(release_env)
     else:
         with pytest.raises(ValueError, match="already exists|Refusing to publish"):
             publish_image.publish(release_env)
         assert not any(args[0] in ("tag", "push") for args in calls)
+
+
+def test_publisher_rejects_wrong_version_before_login(monkeypatch, release_env):
+    def inspect(*args, **kwargs):
+        assert args[:2] == ("image", "inspect")
+        return CompletedProcess(args, 0, IDENTITY.replace("1.0.0", "2.0.0"), "")
+
+    monkeypatch.setattr(publish_image, "docker", inspect)
+    with pytest.raises(ValueError, match="OCI labels"):
+        publish_image.publish(release_env)

@@ -440,7 +440,11 @@ offline extracts. Live Groq output quality remains unmeasured.
 
 For single-host releases, see the [deployment runbook](docs/deployment.md),
 [rollback runbook](docs/rollback.md), and [monitoring and incident response](docs/operations.md).
-They cover the versioned Compose workflow and identify the checks exercised in CI.
+Stage the approved registry digest with the matching read-only v3 bundle and a
+private runtime environment file. The production Compose profile binds to
+loopback and drops Linux capabilities. Open ingress through the TLS gateway
+after readiness, authenticated probes, and rollback prerequisites are verified.
+Record target-host sign-off in the [production checklist](docs/production-checklist.md).
 
 **Probes.**
 - `/health` returns 200 for valid hosts while the process serves.

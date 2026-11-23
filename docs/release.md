@@ -33,7 +33,8 @@ downloads only the required dense inputs, checks them against the committed
 v3 manifest, and runs the container with networking disabled and a fake Groq
 client. The Compose rehearsal detects failed readiness and restores a retained
 image. The [CI workflow](../.github/workflows/ci.yml) also runs the existing
-dependency and Bandit audit in a separate job. See [evidence](evidence.md) for
+dependency, Bandit, and Gitleaks audits in a separate job. The release build
+also runs Trivy on the exact smoke-tested image. See [evidence](evidence.md) for
 the distinction between hosted checks and outstanding production verification.
 
 ## Publish after the stack is approved and merged
@@ -49,17 +50,19 @@ These steps are for a future authorized release operator.
    Leave it unset at repository and organization level. The workflow grants
    package write access only to the manual publication job.
 2. Dispatch **Release image** on `main` with publishing disabled for a dry run.
-   Review the build and smoke results. PR runs perform the same validation
+   Provide the full `main` SHA and review the build, smoke, and Trivy results.
+   PR runs perform the same validation
    without registry credentials.
 3. In a separately approved manual dispatch on `main`, enable `publish` and
    supply the exact full main commit SHA. The workflow runs the full CI jobs
    for that revision first. The publication job then checks the requested SHA
-   and the environment opt-in, builds and smoke-tests the local image, and
+   and the environment opt-in, builds, smoke-tests, and scans the local image, and
    attempts to create
    `ghcr.io/manojkumargudge/hybrid-rag-ms-marco:sha-<full-sha>`. The workflow
    refuses to overwrite this tag or proceed if registry access cannot prove
-   its absence. The job records the registry digest. If a push succeeded but
-   digest verification failed, inspect the package before retrying.
+   its absence. It confirms the pulled digest resolves to the tested image ID
+   and OCI labels before recording the digest. If a push succeeded but digest
+   verification failed, inspect the package before retrying.
 4. Pull the recorded digest and verify its Docker repository digest and
    `org.opencontainers.image.revision` label. The
    `org.opencontainers.image.version` label is `1.0.0`. The registry tag

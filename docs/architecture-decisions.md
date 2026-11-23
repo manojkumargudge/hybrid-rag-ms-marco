@@ -65,10 +65,12 @@ image and artifact bundle an operator responsibility. [Artifact checks](../app/a
 
 Deploy the non-root image by recorded identity, mount artifacts read-only, use
 a private runtime env file, and bind the operations profile to loopback.
+The worker runs without Linux capabilities or privilege escalation.
 The container's HTTP health check measures liveness. Release validation also
 checks readiness and authenticated metadata. Retain the compatible previous
 image and artifacts as a unit. The manual GHCR workflow validates an exact
-main SHA and records the image digest for operators. An orchestrated
+main SHA, scans the smoke-tested image, and checks its identity by registry
+digest before recording it for operators. An orchestrated
 rolling rollout could reduce interruption but would add deployment
 infrastructure. The single service can interrupt traffic during replacement.
 TLS gateway behavior, production traffic, and registry recovery
