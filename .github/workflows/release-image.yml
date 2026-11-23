@@ -7,6 +7,9 @@ on:
       - .dockerignore
       - scripts/check_release_image.sh
       - scripts/publish_image.py
+      - scripts/scan_image_security.sh
+      - scripts/security_gate.py
+      - .github/security-ignore.json
       - scripts/fetch_artifacts.py
       - scripts/docker_smoke*.py
       - scripts/download_models.py
@@ -22,9 +25,9 @@ on:
         type: boolean
         default: false
       commit_sha:
-        description: Full main commit SHA required for publishing
+        description: Full main commit SHA to verify
         type: string
-        required: false
+        required: true
 
 permissions:
   contents: read
@@ -33,7 +36,7 @@ jobs:
   verify:
     if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && !inputs.publish)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -42,6 +45,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Build and validate without publishing
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
         run: bash scripts/check_release_image.sh
 
   release-gates:
@@ -76,6 +81,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Build and validate the release candidate
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
         run: bash scripts/check_release_image.sh
       - name: Publish the checked image under its commit SHA
         env:

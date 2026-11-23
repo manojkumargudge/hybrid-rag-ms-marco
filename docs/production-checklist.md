@@ -48,7 +48,32 @@
 | P8 | Final quality and security audit | Automated | Coverage, Ruff, scoped strict mypy, OpenAPI drift, dependency auditing, scoped Bandit, and a checksummed Gitleaks tracked-tree scan run in hosted CI. |
 | P8 | Report completed items, skips and known risks | Done | [Verification boundaries](evidence.md#verification-boundaries) and [release prerequisites](release.md). |
 
-## P1 verification
+## v1.0.0 operator sign-off
+
+Record the host, approved DNS name, certificate renewal owner, private port,
+release source SHA, registry digest, and inspected image ID in the release
+record. Record the retrieval mode, artifact manifest, and previous release's
+image digest and image ID. Verify and retain the previous image and matching
+artifacts before opening ingress for the candidate.
+
+| Required evidence | Status at candidate preparation |
+|---|---|
+| Exact-SHA CI, release smoke and image scan | Run before publishing. Save both workflow links. |
+| TLS, trusted hosts, CORS, and gateway request limits | Verify on the selected target host. |
+| Secret injection, API-key rotation, and private metrics scrape | Verify with authorized credentials and the operator responsible for rotation. |
+| Health, readiness, authenticated metadata, and one grounded query | Run on loopback before opening ingress, then verify through the authorized gateway. |
+| Rollback bundle and monitoring ownership | Name the release and incident owners, stage the known-good bundle, and check alert delivery. |
+
+## Security exception review
+
+Review the current 12 Debian CVEs by **2026-12-21**, the two BM25 Bandit
+exceptions by **2026-12-31**, and the exact-history Gitleaks exceptions by
+**2027-02-21**. The [register](../.github/security-ignore.json) records the
+exact scopes and reasons. Apply the package update when a fix becomes
+available, then rebuild and rescan the candidate. Avoid carrying exceptions to
+different package versions or to deployments that enable the affected code.
+
+## Historical P1 verification
 
 In PR #12, the Trivy scan gates high and critical findings. The temporary Debian
 exceptions apply only to the package versions in the ignore file and expire

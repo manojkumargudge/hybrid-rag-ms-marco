@@ -79,6 +79,8 @@ start_release() {
     local container
     container=$(compose "$release" ps -q hybrid-rag)
     test "$(docker inspect --format '{{.Image}}' "$container")" = "$image_id"
+    test "$(docker inspect --format '{{json .HostConfig.CapDrop}}' "$container")" = '["ALL"]'
+    test "$(docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$container")" = '["no-new-privileges:true"]'
 }
 
 probe() {

@@ -13,6 +13,12 @@ verified GHCR digest after release authorization.
 - The image runs as a non-root user with pinned model snapshots. Stage the
   matching v3 artifact bundle for the 150,000-passage MS MARCO subset and a
   private runtime configuration before startup.
+- The release workflow scans the image it smoke-tests and verifies the image
+  identity after pulling by digest. The production Compose profile runs with
+  all Linux capabilities dropped and privilege escalation disabled.
+- CI audits Python dependencies, scans reachable history for secrets, and gates
+  high and critical image findings. Review the time-limited Debian exceptions
+  before approving release.
 
 See the [changelog](../CHANGELOG.md), [deployment prerequisites](deployment.md),
 and [rollback procedure](rollback.md). The hosted smoke and rollback checks
