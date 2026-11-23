@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # Built by scripts/prepare_data.py + scripts/build_indices.py.
     manifest_path: str = "artifacts/v3/manifest.json"
+    trusted_manifest_path: str = "manifests/v3.json"
     passages_path: str = "artifacts/v3/passages.parquet"
     dense_index_path: str = "artifacts/v3/dense_index.faiss"
     bm25_index_path: str = "artifacts/v3/bm25/bm25_index.pkl"
@@ -51,6 +52,9 @@ class Settings(BaseSettings):
     groq_timeout_seconds: float = Field(default=10.0, gt=0)
     groq_max_retries: int = Field(default=2, ge=0)
     generation_deadline_seconds: float = Field(default=20.0, gt=0)
+    groq_breaker_failure_threshold: int = Field(default=3, gt=0)
+    groq_breaker_cooldown_seconds: float = Field(default=30.0, gt=0)
+    max_concurrent_queries: int = Field(default=2, gt=0)
     cors_origins: str = ""
     trusted_hosts: str = "localhost,127.0.0.1,testserver"
     # Requests per minute per API key (per client IP for unauthenticated

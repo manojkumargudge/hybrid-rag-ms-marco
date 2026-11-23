@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.artifacts import verify_artifacts
+from app.artifacts import read_verified_artifact
 from app.utils.text import repair_mojibake
 
 
@@ -15,22 +15,25 @@ class BM25Retriever:
         corpus_path: str,
         passages_path: str,
         manifest_path: str,
+        trusted_manifest_path: str | None = None,
     ) -> None:
         self.index_path = Path(index_path)
         self.corpus_path = Path(corpus_path)
         self.passages_path = Path(passages_path)
 
-        # pickle executes code on load: only unpickle files whose sha256
-        # matches the build manifest.
-        verify_artifacts(manifest_path, self.index_path, self.corpus_path)
-
-        # Load the pre-built, sha256-verified BM25 index.
-        with open(self.index_path, "rb") as file:
-            self.bm25 = pickle.load(file)
-
-        # Load pre-tokenized corpus (sha256-verified above).
-        with open(self.corpus_path, "rb") as file:
-            self.tokenized_corpus = pickle.load(file)
+        # Deserialize the verified byte snapshots without reopening the files.
+        index_bytes = read_verified_artifact(
+            manifest_path, self.index_path,
+            trusted_manifest_path=trusted_manifest_path,
+        )
+        self.bm25 = pickle.loads(index_bytes)
+        del index_bytes
+        corpus_bytes = read_verified_artifact(
+            manifest_path, self.corpus_path,
+            trusted_manifest_path=trusted_manifest_path,
+        )
+        self.tokenized_corpus = pickle.loads(corpus_bytes)
+        del corpus_bytes
 
         # Load passages
         self.passages = pd.read_parquet(self.passages_path)

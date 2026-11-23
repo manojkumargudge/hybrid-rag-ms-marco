@@ -21,9 +21,10 @@ ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1
 
 COPY app ./app
+COPY manifests/v3.json ./manifests/v3.json
 
 # Data and indices are NOT baked in; mount them read-only at runtime
-# (see docker-compose.yml). /ready reports 503 until they are present.
+# (see docker-compose.yml). Startup verifies artifacts before serving.
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app
 USER appuser

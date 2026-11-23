@@ -310,6 +310,8 @@ def test_spoofed_xff_does_not_reset_ip_limit_under_uvicorn(monkeypatch):
     import uvicorn
 
     monkeypatch.setattr(settings, "rate_limit_per_min", 2)
+    monkeypatch.setattr(app.state, "get_rag_service", Mock(return_value=Mock()))
+    monkeypatch.setattr(app.state, "draining", False)
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]

@@ -6,13 +6,16 @@ building, API schema. Stubbed (no network/models): the sentence-transformer
 (HashEncoder), the cross-encoder scorer, and the Groq client.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
 import pytest
+from fastapi.testclient import TestClient
 
+from app.artifacts import sha256_file
 from app.config import Settings, settings
 from app.main import app
 from scripts.build_indices import build_bm25, build_dense
@@ -66,6 +69,7 @@ def service(built, monkeypatch, request):
 
     for name, value in {
         "manifest_path": out / "manifest.json",
+        "trusted_manifest_path": out.parent / "trusted.json",
         "passages_path": out / "passages.parquet",
         "dense_index_path": out / "dense_index.faiss",
         "bm25_index_path": out / "bm25/bm25_index.pkl",
@@ -73,8 +77,10 @@ def service(built, monkeypatch, request):
         "groq_api_key": "test-key",
     }.items():
         monkeypatch.setattr(settings, name, str(value))
+    (out.parent / "trusted.json").write_bytes((out / "manifest.json").read_bytes())
     monkeypatch.setattr(settings, "retrieval_mode", mode)
     monkeypatch.setattr(app.state, "rag_service", None)
+    monkeypatch.setattr(app.state, "draining", False)
 
     yield out, groq_client, mode
     app.state.rag_service = None
@@ -131,6 +137,72 @@ def test_ready_is_200_with_fixture_artifacts(anon_client, service):
     assert anon_client.get("/ready").status_code == 200
     assert app.state.rag_service is initialized
     groq_client.chat.completions.create.assert_not_called()
+
+
+@pytest.mark.parametrize(("service", "filename"), [
+    ("dense", "dense_index.faiss"),
+    ("dense", "passages.parquet"),
+    ("hybrid", "bm25/bm25_index.pkl"),
+    ("hybrid", "bm25/tokenized_corpus.pkl"),
+], indirect=["service"])
+def test_startup_rejects_tampering_even_with_updated_mounted_manifest(service, filename):
+    out, groq_client, _ = service
+    file = out / filename
+    file.write_bytes(b"tampered")
+    manifest_path = out / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][filename] = sha256_file(file)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="RAG service initialization failed"), TestClient(app):
+        pytest.fail("Startup accepted a modified artifact.")
+    assert app.state.rag_service is None
+    groq_client.chat.completions.create.assert_not_called()
+
+
+def test_lifespan_loads_and_releases_service(service):
+    _, groq_client, _ = service
+    with TestClient(app) as running:
+        assert app.state.rag_service is not None
+        assert running.get("/ready").status_code == 200
+        groq_client.close.assert_not_called()
+    groq_client.close.assert_called_once_with()
+    assert app.state.rag_service is None
+
+
+@pytest.mark.parametrize("service", ["hybrid"], indirect=True)
+def test_bm25_deserializes_verified_snapshot_if_path_changes(service, monkeypatch):
+    from app.retrieval import bm25_retriever
+
+    read_verified = bm25_retriever.read_verified_artifact
+
+    def read_then_replace(manifest_path, path, **kwargs):
+        verified = read_verified(manifest_path, path, **kwargs)
+        path.write_bytes(b"replaced after verification")
+        return verified
+
+    monkeypatch.setattr(bm25_retriever, "read_verified_artifact", read_then_replace)
+    with TestClient(app) as running:
+        assert running.get("/ready").status_code == 200
+
+
+def test_open_circuit_returns_same_ranked_passages_without_calling_groq(client, service, monkeypatch):
+    out, groq_client, _ = service
+    monkeypatch.setattr(settings, "groq_breaker_failure_threshold", 1)
+    monkeypatch.setattr(settings, "groq_max_retries", 0)
+    query, _ = _first_eval_query(out)
+    payload = {"query": query, "top_k": 3}
+    healthy = client.post("/api/v1/query", json=payload)
+    assert healthy.status_code == 200
+    groq_client.chat.completions.create.side_effect = TimeoutError()
+    failed = client.post("/api/v1/query", json=payload)
+    skipped = client.post("/api/v1/query", json=payload)
+    assert failed.status_code == skipped.status_code == 200
+    assert failed.json()["error"] == "generation_failed"
+    assert skipped.json()["error"] == "generation_circuit_open"
+    assert skipped.json()["answer"] is None
+    assert skipped.json()["citations"] == failed.json()["citations"] == healthy.json()["citations"]
+    assert groq_client.chat.completions.create.call_count == 2
 
 
 @pytest.mark.parametrize("service", MODES, indirect=True)

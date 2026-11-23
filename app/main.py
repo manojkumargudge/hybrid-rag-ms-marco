@@ -1,13 +1,19 @@
 ﻿import json
 import logging
+from asyncio import gather
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.requests import Request
 
 from app.api.routes import router
 from app.artifacts import verify_artifacts
@@ -95,6 +101,7 @@ def create_rag_service() -> RAGService:
         settings.manifest_path,
         settings.passages_path,
         settings.dense_index_path,
+        trusted_manifest_path=settings.trusted_manifest_path,
     )
 
     retriever = DenseRetriever(
@@ -110,6 +117,7 @@ def create_rag_service() -> RAGService:
             corpus_path=settings.bm25_corpus_path,
             passages_path=settings.passages_path,
             manifest_path=settings.manifest_path,
+            trusted_manifest_path=settings.trusted_manifest_path,
         )
         retriever = HybridRetriever(
             dense_retriever=retriever,
@@ -137,6 +145,23 @@ def create_rag_service() -> RAGService:
     )
 
 
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    application.state.draining = False
+    service = await run_in_threadpool(application.state.get_rag_service)
+    try:
+        yield
+    finally:
+        # Uvicorn drains HTTP requests before sending lifespan.shutdown.
+        application.state.draining = True
+        try:
+            # A cancelled HTTP task may still have inference running.
+            await gather(*application.state.query_tasks, return_exceptions=True)
+            await run_in_threadpool(service.generator.close)
+        finally:
+            application.state.rag_service = None
+
+
 app = FastAPI(
     title="Hybrid RAG over MS MARCO",
     description=(
@@ -145,6 +170,7 @@ app = FastAPI(
         "reranking, and Groq-hosted LLM generation."
     ),
     version="1.0.0",
+    lifespan=lifespan,
     # Only /docs and /openapi.json are on the open allowlist; ReDoc and the
     # OAuth2 redirect page are not needed.
     redoc_url=None,
@@ -191,8 +217,25 @@ def get_rag_service() -> RAGService:
 
 app.state.rag_service = None
 app.state.get_rag_service = get_rag_service
+app.state.draining = False
+app.state.query_tasks = set()
 
 app.include_router(router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    try:
+        return await request_validation_exception_handler(request, exc)
+    except (ValueError, RecursionError):
+        # Some rejected input (such as NaN or a lone surrogate) cannot be
+        # echoed in a JSON response. Keep the validation details for those inputs.
+        return JSONResponse(status_code=422, content={
+            "detail": [
+                {key: error[key] for key in ("loc", "msg", "type")}
+                for error in exc.errors()
+            ],
+        })
 
 
 @app.get("/health")
@@ -236,6 +279,7 @@ def readiness_check() -> JSONResponse:
 
     required_paths = {
         "manifest": settings.manifest_path,
+        "trusted_manifest": settings.trusted_manifest_path,
         "passages": settings.passages_path,
         "dense_index": settings.dense_index_path,
     }
@@ -252,7 +296,7 @@ def readiness_check() -> JSONResponse:
     if not configured_key():
         missing.append("api_key")
 
-    if not missing:
+    if not missing and not app.state.draining:
         try:
             app.state.get_rag_service()
         except RuntimeError:
