@@ -431,6 +431,10 @@ offline extracts. Live Groq output quality remains unmeasured.
 
 ## Operations
 
+For single-host releases, see the [deployment runbook](docs/deployment.md),
+[rollback runbook](docs/rollback.md), and [monitoring and incident response](docs/operations.md).
+They cover the versioned Compose workflow and identify the checks exercised in CI.
+
 **Probes.**
 - `/health` returns 200 for valid hosts while the process serves.
 - `/ready` returns 200 when both keys are configured, the required files exist, and the

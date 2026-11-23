@@ -1,0 +1,20 @@
+services:
+  hybrid-rag:
+    image: "${RAG_IMAGE:?Set the locally staged release image}"
+    pull_policy: never
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    env_file:
+      - path: "${RAG_RUNTIME_ENV_FILE:?Set the absolute path to the private runtime env file}"
+        format: raw
+    volumes:
+      - type: bind
+        source: "${RAG_ARTIFACT_DIR:?Set the absolute path to the verified release artifacts}"
+        target: /app/artifacts/v3
+        read_only: true
+        bind:
+          create_host_path: false
+    cpus: "${API_CPUS:-2.0}"
+    mem_limit: "${API_MEMORY_LIMIT:-4g}"
+    stop_grace_period: 45s
+    restart: unless-stopped
